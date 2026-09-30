@@ -42,7 +42,7 @@
     <textarea id="script" style="margin-top:8px" placeholder="粘贴你写的原始文稿，或点击上面选择 .txt 文件上传；无原稿可留空（自动使用 AI 校对）"></textarea>
     <div class="row">
       <label style="font-size:13px" title="默认模式（不用AI）：同音错字/漏字/标点，秒级完成"><input type="checkbox" id="phonetic" checked> 📢 拼音对齐（默认）</label>
-      <label style="font-size:13px" title="调用大模型语义修复，最准确；长字幕需 1-4 分钟"><input type="checkbox" id="aiMode"> 🤖 AI 校正</label>
+      <label style="font-size:13px" title="调用大模型语义修复，最准确；长字幕需 1-4 分钟。无原稿时必须使用且自动勾选"><input type="checkbox" id="aiMode"> 🤖 AI 校正<span id="aiMust" style="color:var(--warn);display:none">（无原稿必选）</span></label>
       <button id="goBtn" style="margin-left:auto">开始校正</button>
     </div>
     <div id="status"></div>
@@ -74,6 +74,23 @@ async function init() {
   $('#cfgBtn').onclick = openCfg;
   $('#cfgProvider').onchange = applyPreset;
   $('#cfgSave').onclick = saveCfg;
+  // 判定依据：有原稿 → 拼音对齐（有参照系，本地秒级）为主，AI 可选；
+  // 无原稿 → 没有对齐参照系，拼音对齐不成立，必须走 AI 语义校对（锁定勾选，服务端二次强制）
+  $('#script').addEventListener('input', syncAiRequirement);
+  syncAiRequirement();
+}
+
+function syncAiRequirement() {
+  const noScript = !$('#script').value.trim();
+  const ai = $('#aiMode');
+  if (noScript) {
+    ai.checked = true;
+    ai.disabled = true;
+    document.getElementById('aiMust').style.display = 'inline';
+  } else {
+    ai.disabled = false;
+    document.getElementById('aiMust').style.display = 'none';
+  }
 }
 
 let PROVIDERS = [];
@@ -141,10 +158,8 @@ async function calibrate() {
     $('#status').className = 'err';
     return;
   }
-  const noScript = !script;   // 无原稿 → 自动进入 AI 校对模式（纯语义纠错）
-  if (noScript && !$('#aiMode').checked) {
-    // 提示后继续（用户不需要手动勾选）
-  }
+  // 判定依据：无原稿 = 无对齐参照系 → 只能 AI 语义校对（后端亦强制，见 app.py）
+  const noScript = !script;
   $('#goBtn').disabled = true;
   const mode = noScript ? '（AI 校对 · 无原稿模式）'
              : $('#aiMode').checked ? '（AI 校正，长字幕约 1-4 分钟）' : '（拼音对齐）';

@@ -98,10 +98,11 @@ def api_srt_calibrate():
     script = body.get("script", "")
     if not srt_text.strip():
         return jsonify({"ok": False, "error": "请先提供 SRT 字幕"}), 400
-    if not script.strip() and not body.get("ai"):
-        return jsonify({"ok": False,
-                        "error": "没有原稿时请使用 AI 校对模式（⚙️ 先配置 AI 服务）；"
-                                 "或补写文稿后用拼音对齐"}), 400
+    if not script.strip():
+        # 判定依据：无原稿 = 无对齐参照系，拼音对齐不成立，必须走 AI 语义校对。
+        # 前端会自动勾选 AI（UI 强制），这里服务端再强制一次（双保险，防绕过）。
+        body["ai"] = True
+        body["phonetic"] = False
     try:
         srt_fixed, changes, applied, notes = srtfix.calibrate_srt(
             srt_text, script,
@@ -109,6 +110,9 @@ def api_srt_calibrate():
             ai=body.get("ai", False))
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
+    except RuntimeError as e:
+        # AI 未配置（无原稿模式下无法工作）→ 400 + 引导配置，而非 500
+        return jsonify({"ok": False, "error": str(e), "need_ai_config": True}), 400
     except Exception as e:
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
 

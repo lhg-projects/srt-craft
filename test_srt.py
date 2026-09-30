@@ -92,6 +92,17 @@ class TestCalibrateSrt(unittest.TestCase):
         self.assertIn("事迹", out)
         self.assertIn("镍价", out)
 
+    def test_no_script_ai_mode(self):
+        """无原稿（script 空）→ AI 纯校对：修同音/专名，保留正确行（引擎层）。"""
+        srt_typo = ("1\n00:00:00,500 --> 00:00:02,500\n他的事绩很感人\n\n"
+                    "2\n00:00:03,000 --> 00:00:04,000\n印尼孽股产能持续释放\n\n"
+                    "3\n00:00:05,000 --> 00:00:07,000\n这个票我现在依然看好\n")
+        out, changes, applied, notes = srtfix.calibrate_srt(srt_typo, "", ai=True)
+        self.assertEqual(applied, 2)
+        self.assertIn("他的事迹很感人", out)
+        self.assertIn("印尼镍钴产能持续释放", out)
+        self.assertIn("这个票我现在依然看好", out)
+
 
 class TestSrtApi(unittest.TestCase):
     @classmethod
@@ -108,9 +119,18 @@ class TestSrtApi(unittest.TestCase):
         self.assertFalse(r.get_json()["ok"])
         self.assertIn("不存在", r.get_json()["error"])
 
-    def test_calibrate_empty_script_400(self):
-        r = self.client.post("/api/srt/calibrate", json={"srt": SRT_OK, "script": ""})
-        self.assertEqual(r.status_code, 400)
+    def test_empty_script_forces_ai(self):
+        """无原稿（script 空）→ 服务端自动切换 AI 校对（判定依据：无对齐参照系，
+        拼音对齐不成立）。即使请求只给了 phonetic 也强制走 AI。"""
+        srt_typo = ("1\n00:00:00,500 --> 00:00:02,500\n他的事绩很感人\n\n"
+                    "2\n00:00:03,000 --> 00:00:04,000\n印尼孽股产能持续释放\n")
+        r = self.client.post("/api/srt/calibrate", json={"srt": srt_typo, "script": ""})
+        self.assertEqual(r.status_code, 200)
+        data = r.get_json()
+        self.assertTrue(data["ok"])
+        self.assertGreaterEqual(data["applied"], 1)
+        self.assertIn("事迹", data["srt"])
+        self.assertIn("镍钴", data["srt"])
 
     def test_calibrate_bad_srt_400(self):
         r = self.client.post("/api/srt/calibrate", json={"srt": "这不是srt", "script": "x"})
