@@ -37,6 +37,18 @@ SYSTEM_PROMPT = """你是字幕校准助手。给你两份文本：
 - 不要把多行合并成一行，也不要把一行拆成多行
 - 直接输出修正后的各行，不要行号、不要解释、不要输出文稿"""
 
+# 无原稿模式：纯校对，没有参照系，规则必须更保守（AI 可能把对的改成错的）
+NO_SCRIPT_SYSTEM_PROMPT = """你是字幕校对助手。给你一份语音识别的字幕（无原始文稿）。
+
+任务：只修正【确定性错误】，严格规则：
+- 只修：同音错字（结合上下文判断，如"印尼孽股"→"印尼镍钴"）、重复字词（如"的的"）、
+  明显的标点/数字格式问题、上下文能唯一确定的专名错写
+- 不修：任何需要猜测的表达、口误、语气词、口语化说法——保持原样
+- 输出行数必须与输入字幕行数完全相同，按原顺序逐行输出
+- 不要把多行合并成一行，也不要把一行拆成多行，不要改写句式
+- 宁可少改，不可改错；没有把握就原样输出
+- 直接输出修正后的各行，不要行号、不要解释"""
+
 BATCH_SIZE = 12  # 每批送多少行，行间上下文足够且可控
 
 
@@ -95,24 +107,33 @@ def _chat(cfg, messages, max_tokens=16000, timeout=600):
 
 def ai_align(subtitles, script, cfg=None):
     """subtitles: [{segment_id, material_id, text, start_sec,...}]
-    script: 整理后的原稿字符串
+    script: 整理后的原稿字符串；**为空时进入"无原稿校对"模式**（纯 AI 语义纠错，
+    提示词更保守：只修确定性错误）。
     返回 (fixed, changes, notes)，结构与 subfix.align 一致。"""
     cfg = cfg or load_config()
     if not (cfg.get("ai_api_key") or "").strip() and \
        cfg.get("ai_provider") != "ollama":
         raise RuntimeError("请先在「⚙️ AI 设置」填写 API 密钥（Ollama 本地模式除外）")
 
+    no_script = not script.strip()
+    system_prompt = NO_SCRIPT_SYSTEM_PROMPT if no_script else SYSTEM_PROMPT
     lines = [s["text"] for s in subtitles]
     fixed_lines = []
     notes = []
     for start in range(0, len(lines), BATCH_SIZE):
         batch = lines[start:start + BATCH_SIZE]
         batch_block = "\n".join(batch)
-        prompt = (f"【字幕】\n{batch_block}\n\n【文稿】\n{script}\n\n"
-                  f"请输出修正后的 {len(batch)} 行字幕。")
+        if no_script:
+            # 无原稿：全量字幕作为上下文（无参照系时前后文是唯一的纠错线索）
+            prompt = (f"【字幕全文（上下文）】\n{chr(10).join(lines)}\n\n"
+                      f"【待校对】（第 {start + 1}~{start + len(batch)} 行）\n{batch_block}\n\n"
+                      f"请只输出【待校对】部分修正后的 {len(batch)} 行字幕。")
+        else:
+            prompt = (f"【字幕】\n{batch_block}\n\n【文稿】\n{script}\n\n"
+                      f"请输出修正后的 {len(batch)} 行字幕。")
         try:
             out = _chat(cfg, [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}])
         except Exception as e:
             notes.append(f"批次 {start // BATCH_SIZE + 1} 调用失败: {e}")

@@ -37,9 +37,9 @@
     </div>
     <textarea id="srt" class="mono" placeholder="粘贴标准 SRT 内容：&#10;1&#10;00:00:00,100 --> 00:00:02,500&#10;字幕文本"></textarea>
     <div class="hint">支持剪映「导出字幕」生成的 SRT，时间轴会原样保留，校正只改文本。</div>
-    <h2 style="margin-top:16px">② 原始文稿（正确版）</h2>
+    <h2 style="margin-top:16px">② 原始文稿（正确版 · 无原稿可留空）</h2>
     <input type="file" id="scriptFile" accept=".txt,.md">
-    <textarea id="script" style="margin-top:8px" placeholder="粘贴你写的原始文稿，或点击上面选择 .txt 文件上传"></textarea>
+    <textarea id="script" style="margin-top:8px" placeholder="粘贴你写的原始文稿，或点击上面选择 .txt 文件上传；无原稿可留空（自动使用 AI 校对）"></textarea>
     <div class="row">
       <label style="font-size:13px" title="默认模式（不用AI）：同音错字/漏字/标点，秒级完成"><input type="checkbox" id="phonetic" checked> 📢 拼音对齐（默认）</label>
       <label style="font-size:13px" title="调用大模型语义修复，最准确；长字幕需 1-4 分钟"><input type="checkbox" id="aiMode"> 🤖 AI 校正</label>
@@ -89,6 +89,7 @@ async function openCfg() {
   $('#cfgModel').value = r.ai_model || '';
   $('#cfgKey').value = '';
   $('#cfgKey').placeholder = r.ai_api_key_set ? '已保存（留空表示不修改）' : 'API 密钥';
+  window.wasKeySet = r.ai_api_key_set;
   cfgDialog.showModal();
 }
 
@@ -99,7 +100,10 @@ function applyPreset() {
 
 async function saveCfg() {
   const body = { ai_provider: $('#cfgProvider').value, ai_base_url: $('#cfgUrl').value, ai_model: $('#cfgModel').value };
-  if ($('#cfgKey').value.trim()) body.ai_api_key = $('#cfgKey').value.trim();
+  if ($('#cfgKey').value.trim()) {
+    if (wasKeySet && !confirm("将覆盖已保存的 API 密钥，确认？")) return;
+    body.ai_api_key = $('#cfgKey').value.trim();
+  }
   const r = await (await fetch('/api/config', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body)
@@ -132,13 +136,18 @@ async function genSrt() {
 async function calibrate() {
   const srt = $('#srt').value.trim();
   const script = $('#script').value.trim();
-  if (!srt || !script) {
-    $('#status').textContent = 'SRT 和原始文稿都需要提供';
+  if (!srt) {
+    $('#status').textContent = '请先提供 SRT 字幕';
     $('#status').className = 'err';
     return;
   }
+  const noScript = !script;   // 无原稿 → 自动进入 AI 校对模式（纯语义纠错）
+  if (noScript && !$('#aiMode').checked) {
+    // 提示后继续（用户不需要手动勾选）
+  }
   $('#goBtn').disabled = true;
-  const mode = $('#aiMode').checked ? '（AI 校正，长字幕约 1-4 分钟）' : '（拼音对齐）';
+  const mode = noScript ? '（AI 校对 · 无原稿模式）'
+             : $('#aiMode').checked ? '（AI 校正，长字幕约 1-4 分钟）' : '（拼音对齐）';
   $('#status').textContent = '校正中…' + mode;
   $('#status').className = '';
   try {
@@ -146,8 +155,8 @@ async function calibrate() {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
         srt: srt, script: script,
-        phonetic: $('#phonetic').checked && !$('#aiMode').checked,
-        ai: $('#aiMode').checked,
+        phonetic: $('#phonetic').checked && !$('#aiMode').checked && !noScript,
+        ai: $('#aiMode').checked || noScript,
       })
     })).json();
     $('#goBtn').disabled = false;

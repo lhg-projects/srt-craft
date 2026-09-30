@@ -98,8 +98,10 @@ def api_srt_calibrate():
     script = body.get("script", "")
     if not srt_text.strip():
         return jsonify({"ok": False, "error": "请先提供 SRT 字幕"}), 400
-    if not script.strip():
-        return jsonify({"ok": False, "error": "请先提供原始文稿"}), 400
+    if not script.strip() and not body.get("ai"):
+        return jsonify({"ok": False,
+                        "error": "没有原稿时请使用 AI 校对模式（⚙️ 先配置 AI 服务）；"
+                                 "或补写文稿后用拼音对齐"}), 400
     try:
         srt_fixed, changes, applied, notes = srtfix.calibrate_srt(
             srt_text, script,
