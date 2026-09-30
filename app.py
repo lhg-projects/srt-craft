@@ -14,6 +14,7 @@ from flask import Flask, jsonify, request, send_from_directory
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import draft  # noqa: E402
 import srtfix  # noqa: E402
+import audio_io  # noqa: E402
 
 app = Flask(__name__, static_folder="static")
 
@@ -28,6 +29,78 @@ def index():
 @app.route("/srt.html")
 def srt_page():
     return send_from_directory("static", "srt.html")
+
+
+@app.route("/favicon.ico")
+def favicon_ico():
+    """浏览器默认请求 /favicon.ico；没有它标签页图标时有时无（日志刷 404）。"""
+    return send_from_directory("static", "favicon.svg", mimetype="image/svg+xml")
+
+
+# ---------- 音频导入生成 SRT（借鉴 srt-mix：裁剪 + whisper 转写） ----------
+
+@app.route("/api/audio/prepare", methods=["POST"])
+def api_audio_prepare():
+    """上传音频 → 保存原文件 → 返回时长。body = multipart {audio}。
+    裁剪不在这一步做：头/尾秒数以点击「生成 SRT」时的输入为准。"""
+    f = request.files.get("audio")
+    if not f or not f.filename:
+        return jsonify({"ok": False, "error": "没有音频文件"}), 400
+    try:
+        path = audio_io.save_upload(f)
+        dur = audio_io.audio_duration_sec(path)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
+    return jsonify({"ok": True, "audio_path": path, "duration_sec": round(dur, 1)})
+
+
+@app.route("/api/audio/transcribe", methods=["POST"])
+def api_audio_transcribe():
+    """按当前头/尾秒数裁剪 → whisper 粗稿 SRT。
+    body = {audio_path, head_sec, tail_sec}。裁剪在本步执行，转写的
+    时间轴从裁剪后音频的 0 开始（填入 ① 即是剪好的稿）。"""
+    import ai_subfix
+    import asr_local
+    body = request.get_json(force=True)
+    path = body.get("audio_path", "")
+    if not path or not os.path.isfile(path):
+        return jsonify({"ok": False, "error": "音频不存在，请先上传"}), 400
+    try:
+        trimmed, dur, keep = audio_io.trim_audio(
+            path, body.get("head_sec", 0), body.get("tail_sec", 0))
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except RuntimeError as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    try:
+        srt_text, lang, _ = asr_local.transcribe_to_srt(trimmed, cfg=ai_subfix.load_config())
+    except ImportError:
+        return jsonify({"ok": False, "error": "未安装 faster-whisper：.venv/bin/pip install faster-whisper",
+                        "need_asr_install": True}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"转写失败: {type(e).__name__}: {e}"}), 500
+    return jsonify({"ok": True, "srt": srt_text, "count": srt_text.count("-->"),
+                    "language": lang, "original_sec": round(dur, 1),
+                    "kept_sec": round(keep, 1)})
+
+
+@app.route("/api/srt/default_source", methods=["GET", "POST", "DELETE"])
+def api_srt_default_source():
+    """① 区块输入来源的用户默认（draft/audio），持久化在 config.json。
+    GET 返回生效默认（丢失/非法 → draft）；POST {source} 记住选择；
+    DELETE = 恢复默认（删键，等同配置丢失）。"""
+    import ai_subfix
+    if request.method == "POST":
+        source = (request.get_json(force=True) or {}).get("source", "")
+        try:
+            audio_io.set_default_source(source, ai_subfix.load_config, ai_subfix.save_config)
+        except ValueError as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+    elif request.method == "DELETE":
+        audio_io.set_default_source("", ai_subfix.load_config, ai_subfix.save_config)
+    cfg = ai_subfix.load_config()
+    return jsonify({"ok": True, "default_source": audio_io.effective_default_source(cfg),
+                    "persisted": "default_srt_source" in cfg})
 
 
 @app.route("/api/health")

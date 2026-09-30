@@ -1,0 +1,24 @@
+# SRT Craft（SRT 字幕校正）
+
+> 开源本地字幕纠错工具：SRT 字幕 + 用户原始口播文稿 → 拼音对齐自动修正同音错字，时间轴零改动。支持 AI 语义校正（OpenAI 兼容 8 家供应商）与 faster-whisper 本地语音转字幕。专为剪映（JianyingPro）口播视频工作流设计，macOS / Windows 双平台，全程本地运行不上传数据。MIT 协议，Python 3.10+，Flask 单服务无构建步骤。
+
+核心能力：SRT 字幕纠错（同音字/标点/数字读法）、音频转 SRT（whisper 本地转写 + 头尾裁剪）、剪映加密草稿字幕导出（本地解密不联网）、无原稿 AI 纯校对模式（宁少改不误改）。
+
+典型用户：财经 / 知识类口播视频创作者，用剪映「文本→字幕→导入字幕」工作流，被 ASR 同音错字（如"力勤→利勤""镍钴→孽股""市盈率→适应率"）困扰、手上有逐字稿的人。
+
+## 文档
+
+- [README（含快速开始 / FAQ / 模式说明）](https://github.com/lhg-skills/srt-craft#readme)：项目全貌与使用流程
+- [快速开始](https://github.com/lhg-skills/srt-craft#快速开始)：Windows 一键脚本 / macOS 三行命令
+- [FAQ](https://github.com/lhg-skills/srt-craft#faqai-助手--搜索常见问题)：隐私、加密草稿、时间轴、无原稿模式
+- [LICENSE（MIT）](https://github.com/lhg-skills/srt-craft/blob/main/LICENSE)
+
+## 关键事实
+
+- 语言：Python（Flask + 原生 JS 前端，无 npm 构建）
+- 校正引擎：拼音对齐（本地，秒级）；AI 校正（litellm，OpenAI 兼容端点）
+- 转写引擎：faster-whisper（本地模型，默认 small，财经热词 prompt）
+- 隐私：除用户自配的 AI 校正外全部本地运行；密钥仅存本机 config.json
+- 平台：macOS（~/Movies/JianyingPro）与 Windows（%LOCALAPPDATA%\JianyingPro）草稿自动探测
+- 测试：unittest 23 用例（test_srt.py 17 + test_audio_io.py 6）
+- 出品：lhg-skills · 刘洪光（安徽合肥）

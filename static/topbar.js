@@ -14,6 +14,10 @@
   var link = document.createElement("link");
   link.rel = "stylesheet"; link.href = "/static/theme.css";
   document.head.appendChild(link);
+  // 标签页角标（favicon），与品牌一致；SVG 现代浏览器全支持
+  var fav = document.createElement("link");
+  fav.rel = "icon"; fav.type = "image/svg+xml"; fav.href = "/static/favicon.svg";
+  document.head.appendChild(fav);
 
   function esc(s) {
     return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

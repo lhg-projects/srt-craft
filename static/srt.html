@@ -2,20 +2,24 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>SRT 校正</title>
+<title>SRT 校正 · SRT Craft — 剪映口播字幕纠错工具（开源）</title>
+<meta name="description" content="开源本地字幕纠错工具：SRT 字幕 + 你的原始口播文稿 → 拼音对齐自动修正同音错字，时间轴零改动；支持导入音频 whisper 转字幕与 AI 语义校正，专为剪映口播视频工作流打造，全程本地运行。">
 <script src="/static/topbar.js" data-brand="SRT 字幕校正"></script>
 <style>
   main { max-width: 1140px; margin: 20px auto; padding: 0 16px; display: grid;
          grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
   textarea { height: 240px; }
+  /* 报告条数多时内部滚动，避免把 ④ 下载区顶出首屏 */
+  #report { max-height: 45vh; overflow-y: auto; overscroll-behavior: contain; }
+  #out { height: 200px; }
 </style>
 </head>
 <body>
 <header>
-  <button class="ghost" id="cfgBtn" style="padding:5px 12px;font-size:13px">⚙️ AI 设置（可选）</button>
+  <button class="ghost" id="cfgBtn" style="padding:5px 12px;font-size:13px">⚙️ AI 设置（推荐）</button>
 </header>
 <dialog id="cfgDialog" style="width:720px;max-width:94vw">
-  <h3>⚙️ AI 校正设置（可选）</h3>
+  <h3>⚙️ AI 校正设置（推荐）</h3>
   <div class="hint" style="margin:0 0 12px">不配置也能用：拼音对齐完全本地运行。AI 模式支持多家供应商（密钥只保存在本机 config.json）。</div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
     <div>
@@ -44,12 +48,32 @@
 </dialog>
 <main>
   <div class="panel">
-    <h2>① SRT 字幕（剪映导出 / 草稿生成）</h2>
+    <h2>① SRT 字幕（剪映导出 / 草稿生成）
+      <select id="srcSel" style="margin-left:8px;font-size:13px" title="选择字幕来源；选定后记住为默认，下次打开仍生效">
+        <option value="draft">来源：从草稿生成</option>
+        <option value="audio">来源：导入音频生成</option>
+      </select>
+      <button class="ghost" id="srcReset" style="padding:4px 10px;font-size:12px" title="清除记住的默认来源，回到「从草稿生成」">恢复默认</button>
+    </h2>
+    <div id="srcDraft">
     <div class="row" style="margin:0 0 10px">
       <select id="draftSel"><option value="">选择草稿…</option></select>
       <button class="ghost" id="genBtn">从草稿生成 SRT</button>
       <span style="font-size:12px;color:#888">或粘贴 / 上传剪映导出的 .srt</span>
       <input type="file" id="srtFile" accept=".srt,.txt">
+    </div>
+    </div>
+    <div id="srcAudio" style="display:none">
+      <div class="row" style="margin:0 0 10px">
+        <input type="file" id="audioFile" accept="audio/*,.wav,.mp3,.m4a,.aac,.flac">
+        <span id="audioInfo" class="hint" style="margin:0"></span>
+      </div>
+      <div class="row" style="margin:0 0 10px">
+        <label style="font-size:13px">剪掉开头 <input type="number" id="headSec" min="0" step="0.5" value="0" style="width:64px"> 秒</label>
+        <label style="font-size:13px">剪掉结尾 <input type="number" id="tailSec" min="0" step="0.5" value="0" style="width:64px"> 秒</label>
+        <button class="ghost" id="asrBtn" disabled>🎙️ 生成 SRT（whisper）</button>
+      </div>
+      <div class="hint" style="margin:0 0 8px">上传音频 → 剪掉开头/结尾（去口误与寒暄）→ 本地 whisper 转写成 SRT 填入下方。首次使用会下载 whisper 模型，耗时较长。</div>
     </div>
     <textarea id="srt" class="mono" placeholder="粘贴标准 SRT 内容：&#10;1&#10;00:00:00,100 --> 00:00:02,500&#10;字幕文本"></textarea>
     <div class="hint">支持剪映「导出字幕」生成的 SRT，时间轴会原样保留，校正只改文本。</div>
@@ -96,6 +120,91 @@ async function init() {
   // 无原稿 → 没有对齐参照系，拼音对齐不成立，必须走 AI 语义校对（锁定勾选，服务端二次强制）
   $('#script').addEventListener('input', syncAiRequirement);
   syncAiRequirement();
+  initSource();
+}
+
+// ---------- ① 来源切换 + 音频转 SRT ----------
+
+let audioPath = '';
+
+async function initSource() {
+  $('#srcSel').onchange = () => { applySource(); saveDefaultSource(); };
+  $('#srcReset').onclick = async () => {
+    await fetch('/api/srt/default_source', { method: 'DELETE' });
+    $('#srcSel').value = 'draft';
+    applySource();
+    $('#status').textContent = '已恢复默认来源：从草稿生成';
+    $('#status').className = '';
+  };
+  $('#audioFile').onchange = uploadAudio;
+  $('#asrBtn').onclick = runAsr;
+  // 服务端配置是唯一默认源（丢了自动回退 draft），localStorage 仅做缓存避免闪烁
+  try {
+    const r = await (await fetch('/api/srt/default_source')).json();
+    $('#srcSel').value = r.default_source;
+    localStorage.setItem('srt_default_source', r.default_source);
+  } catch (e) {
+    $('#srcSel').value = localStorage.getItem('srt_default_source') || 'draft';
+  }
+  applySource();
+}
+
+function applySource() {
+  const isAudio = $('#srcSel').value === 'audio';
+  $('#srcDraft').style.display = isAudio ? 'none' : '';
+  $('#srcAudio').style.display = isAudio ? '' : 'none';
+}
+
+async function saveDefaultSource() {
+  // 用户选定即记住，一直保持，直到点「恢复默认」或配置文件丢失
+  localStorage.setItem('srt_default_source', $('#srcSel').value);
+  await fetch('/api/srt/default_source', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ source: $('#srcSel').value })
+  });
+}
+
+async function uploadAudio(e) {
+  const f = e.target.files[0];
+  if (!f) return;
+  $('#audioInfo').textContent = '上传中…';
+  $('#asrBtn').disabled = true;
+  const fd = new FormData();
+  fd.append('audio', f);
+  try {
+    const r = await (await fetch('/api/audio/prepare', { method: 'POST', body: fd })).json();
+    if (!r.ok) { $('#audioInfo').textContent = '❌ ' + r.error; return; }
+    audioPath = r.audio_path;
+    $('#audioInfo').textContent = `✅ 时长 ${r.duration_sec}s`;
+    $('#asrBtn').disabled = false;
+  } catch (err) {
+    $('#audioInfo').textContent = '❌ 上传失败: ' + err;
+  }
+}
+
+async function runAsr() {
+  if (!audioPath) return;
+  $('#status').textContent = 'whisper 转写中…（首次使用需下载模型，请耐心等待）';
+  $('#status').className = '';
+  $('#asrBtn').disabled = true;
+  try {
+    // 头/尾秒数在点击生成时读取：改完数字无需重新上传，直接再点即可
+    const r = await (await fetch('/api/audio/transcribe', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ audio_path: audioPath,
+                             head_sec: parseFloat($('#headSec').value) || 0,
+                             tail_sec: parseFloat($('#tailSec').value) || 0 })
+    })).json();
+    if (!r.ok) { $('#status').textContent = r.error; $('#status').className = 'err'; return; }
+    $('#srt').value = r.srt;
+    $('#status').textContent = `转写完成：${r.count} 条字幕（${r.language}，裁剪后 ${r.kept_sec}s）`;
+    $('#status').className = 'ok';
+  } catch (e) {
+    $('#status').textContent = '转写失败: ' + e;
+    $('#status').className = 'err';
+  } finally {
+    $('#asrBtn').disabled = false;
+  }
 }
 
 function syncAiRequirement() {

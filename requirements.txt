@@ -4,3 +4,4 @@ jieba>=0.42
 pypinyin>=0.51
 cryptography>=42.0
 litellm>=1.40
+faster-whisper>=1.0
