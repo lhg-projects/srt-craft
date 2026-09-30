@@ -1,0 +1,7 @@
+__pycache__/
+.venv/
+config.json
+calibration_history/
+downloads/
+*.log
+.DS_Store

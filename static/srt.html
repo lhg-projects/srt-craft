@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>SRT 校正</title>
+<script src="/static/topbar.js" data-brand="SRT 字幕校正"></script>
+<style>
+  main { max-width: 1140px; margin: 20px auto; padding: 0 16px; display: grid;
+         grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+  textarea { height: 240px; }
+</style>
+</head>
+<body>
+<header>
+  <button class="ghost" id="cfgBtn" style="padding:5px 12px;font-size:13px">⚙️ AI 设置（可选）</button>
+</header>
+<dialog id="cfgDialog">
+  <h3>⚙️ AI 校正设置（可选）</h3>
+  <div class="hint" style="margin:0 0 12px">不配置也能用：拼音对齐和重建模式完全本地运行。AI 模式需要任意 OpenAI 兼容服务（密钥只保存在本机 config.json）。</div>
+  <select id="cfgProvider"></select>
+  <input type="text" id="cfgUrl" placeholder="API 地址，如 https://api.openai.com/v1">
+  <input type="text" id="cfgModel" placeholder="模型名，如 gpt-4o-mini">
+  <input type="password" id="cfgKey" placeholder="API 密钥（留空表示不修改）">
+  <div class="actions">
+    <button class="ghost" onclick="cfgDialog.close()">取消</button>
+    <button id="cfgSave">保存</button>
+  </div>
+</dialog>
+<main>
+  <div class="panel">
+    <h2>① SRT 字幕（剪映导出 / 草稿生成）</h2>
+    <div class="row" style="margin:0 0 10px">
+      <select id="draftSel"><option value="">选择草稿…</option></select>
+      <button class="ghost" id="genBtn">从草稿生成 SRT</button>
+      <span style="font-size:12px;color:#888">或粘贴 / 上传剪映导出的 .srt</span>
+      <input type="file" id="srtFile" accept=".srt,.txt">
+    </div>
+    <textarea id="srt" class="mono" placeholder="粘贴标准 SRT 内容：&#10;1&#10;00:00:00,100 --> 00:00:02,500&#10;字幕文本"></textarea>
+    <div class="hint">支持剪映「导出字幕」生成的 SRT，时间轴会原样保留，校正只改文本。</div>
+    <h2 style="margin-top:16px">② 原始文稿（正确版）</h2>
+    <input type="file" id="scriptFile" accept=".txt,.md">
+    <textarea id="script" style="margin-top:8px" placeholder="粘贴你写的原始文稿，或点击上面选择 .txt 文件上传"></textarea>
+    <div class="row">
+      <label style="font-size:13px" title="默认模式（不用AI）：同音错字/漏字/标点，秒级完成"><input type="checkbox" id="phonetic" checked> 📢 拼音对齐（默认）</label>
+      <label style="font-size:13px" title="调用大模型语义修复，最准确；长字幕需 1-4 分钟"><input type="checkbox" id="aiMode"> 🤖 AI 校正</label>
+      <button id="goBtn" style="margin-left:auto">开始校正</button>
+    </div>
+    <div id="status"></div>
+  </div>
+  <div class="panel">
+    <h2>③ 校正报告</h2>
+    <div id="report"><div class="hint">校正结果会显示在这里：每一处修改都列出原句与新句，供你核对。</div></div>
+    <h2 style="margin-top:16px">④ 修正版 SRT（导入剪映用）</h2>
+    <textarea id="out" class="mono" placeholder="校正后的 SRT 会显示在这里"></textarea>
+    <div class="row">
+      <button id="dlBtn" disabled>⬇️ 下载修正版 .srt</button>
+      <span class="hint" style="margin:0">剪映里：文本 → 字幕 → 导入字幕（或拖入 SRT）→ 删除旧字幕轨</span>
+    </div>
+  </div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+async function init() {
+  const ds = await (await fetch('/api/drafts')).json();
+  $('#draftSel').innerHTML = '<option value="">选择草稿…</option>' +
+    ds.map(d => `<option value="${esc(d.name)}">${esc(d.name)}</option>`).join('');
+  $('#genBtn').onclick = genSrt;
+  $('#srtFile').onchange = e => readFile(e, $('#srt'));
+  $('#scriptFile').onchange = e => readFile(e, $('#script'));
+  $('#goBtn').onclick = calibrate;
+  $('#dlBtn').onclick = download;
+  $('#cfgBtn').onclick = openCfg;
+  $('#cfgProvider').onchange = applyPreset;
+  $('#cfgSave').onclick = saveCfg;
+}
+
+let PROVIDERS = [];
+async function openCfg() {
+  const r = await (await fetch('/api/config')).json();
+  PROVIDERS = r.providers || [];
+  if (!$('#cfgProvider').options.length) {
+    $('#cfgProvider').innerHTML = PROVIDERS.map(p =>
+      `<option value="${p.id}">${p.label}</option>`).join('');
+  }
+  $('#cfgProvider').value = r.ai_provider || 'openai';
+  $('#cfgUrl').value = r.ai_base_url || '';
+  $('#cfgModel').value = r.ai_model || '';
+  $('#cfgKey').value = '';
+  $('#cfgKey').placeholder = r.ai_api_key_set ? '已保存（留空表示不修改）' : 'API 密钥';
+  cfgDialog.showModal();
+}
+
+function applyPreset() {
+  const p = PROVIDERS.find(x => x.id === $('#cfgProvider').value);
+  if (p) { $('#cfgUrl').value = p.base_url; $('#cfgModel').value = p.model; }
+}
+
+async function saveCfg() {
+  const body = { ai_provider: $('#cfgProvider').value, ai_base_url: $('#cfgUrl').value, ai_model: $('#cfgModel').value };
+  if ($('#cfgKey').value.trim()) body.ai_api_key = $('#cfgKey').value.trim();
+  const r = await (await fetch('/api/config', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  })).json();
+  cfgDialog.close();
+  $('#status').textContent = r.ai_api_key_set ? '✅ AI 配置已保存' : '已保存（AI 密钥未设置，AI 模式不可用）';
+  $('#status').className = r.ai_api_key_set ? 'ok' : '';
+}
+
+function readFile(e, target) {
+  const f = e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = () => target.value = r.result;
+  r.readAsText(f, 'utf-8');
+}
+
+async function genSrt() {
+  const name = $('#draftSel').value;
+  if (!name) return;
+  $('#status').textContent = '生成中…';
+  $('#status').className = '';
+  const r = await (await fetch('/api/srt/export?draft=' + encodeURIComponent(name))).json();
+  if (!r.ok) { $('#status').textContent = r.error; $('#status').className = 'err'; return; }
+  $('#srt').value = r.srt;
+  $('#status').textContent = `已从草稿生成 ${r.count} 条字幕的 SRT`;
+  $('#status').className = 'ok';
+}
+
+async function calibrate() {
+  const srt = $('#srt').value.trim();
+  const script = $('#script').value.trim();
+  if (!srt || !script) {
+    $('#status').textContent = 'SRT 和原始文稿都需要提供';
+    $('#status').className = 'err';
+    return;
+  }
+  $('#goBtn').disabled = true;
+  const mode = $('#aiMode').checked ? '（AI 校正，长字幕约 1-4 分钟）' : '（拼音对齐）';
+  $('#status').textContent = '校正中…' + mode;
+  $('#status').className = '';
+  try {
+    const r = await (await fetch('/api/srt/calibrate', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        srt: srt, script: script,
+        phonetic: $('#phonetic').checked && !$('#aiMode').checked,
+        ai: $('#aiMode').checked,
+      })
+    })).json();
+    $('#goBtn').disabled = false;
+    if (!r.ok) {
+      $('#status').textContent = r.error || '校正失败';
+      $('#status').className = 'err';
+      return;
+    }
+    $('#status').textContent = `校正完成：${r.applied} 条已修正（清单 ${r.changes.length} 处）`;
+    $('#status').className = r.applied ? 'ok' : '';
+    $('#out').value = r.srt;
+    $('#dlBtn').disabled = false;
+    $('#report').innerHTML = !r.changes.length
+      ? '<div class="nochange">✅ 未发现需要修改的地方，SRT 与文稿一致。</div>'
+      : r.changes.map(c => `<div class="change">
+          <div class="meta">第 ${c.index} 条字幕${c.start_sec != null ? ' · ' + Number(c.start_sec).toFixed(1) + 's' : ''}</div>
+          <div class="old">${esc(c.old)}</div>
+          <div class="new">${esc(c.new)}</div>
+        </div>`).join('');
+  } catch (e) {
+    $('#goBtn').disabled = false;
+    $('#status').textContent = '校正失败: ' + e;
+    $('#status').className = 'err';
+  }
+}
+
+function download() {
+  const name = $('#draftSel').value || 'subtitles';
+  const blob = new Blob([$('#out').value], {type: 'application/x-subrip;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name.replace(/[\\/:*?"<>|\s]+/g, '_') + '_修正.srt';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+init();
+</script>
+</body>
+</html>
