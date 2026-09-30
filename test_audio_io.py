@@ -54,6 +54,38 @@ class TestTrimAudio(unittest.TestCase):
             self.assertLessEqual(keep, 2.0)  # 尾部被钳到 dur/2
 
 
+class TestTrimForDownload(unittest.TestCase):
+    """④ 区「下载裁剪后音频」：格式跟随原文件（重编码保证切点精确）。"""
+
+    @unittest.skipUnless(_ffmpeg_available(), "需要 ffmpeg")
+    def test_cut_wav_duration(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "a.wav")
+            _make_wav(src, 6)
+            out, dur, keep = audio_io.trim_audio_for_download(src, 1.0, 0.5)
+            self.assertTrue(out.endswith(".wav"))
+            self.assertAlmostEqual(keep, 4.5, delta=0.3)
+
+    @unittest.skipUnless(_ffmpeg_available(), "需要 ffmpeg")
+    def test_cut_too_much_raises(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "a.wav")
+            _make_wav(src, 4)
+            with self.assertRaises(ValueError):
+                audio_io.trim_audio_for_download(src, 3.5, 3.5)
+
+    @unittest.skipUnless(_ffmpeg_available(), "需要 ffmpeg")
+    def test_cut_keeps_extension(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "a.wav")
+            _make_wav(src, 4)
+            for target_ext in (".mp3", ".m4a"):
+                dst = os.path.join(d, "b" + target_ext)
+                shutil.copy(src, dst)
+                out, _, _ = audio_io.trim_audio_for_download(dst, 1, 0)
+                self.assertTrue(out.endswith(target_ext), f"{target_ext} 应保持原扩展名")
+
+
 class TestDefaultSourceConfig(unittest.TestCase):
     """默认来源收口在 ai_subfix 的 config.json（单一配置源）。"""
 

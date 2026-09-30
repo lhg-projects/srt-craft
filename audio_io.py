@@ -52,6 +52,33 @@ def trim_audio(src_path, head_sec=0.0, tail_sec=0.0):
     return out_path, dur, audio_duration_sec(out_path)
 
 
+def trim_audio_for_download(src_path, head_sec=0.0, tail_sec=0.0):
+    """为「下载裁剪后音频」裁剪：保持原扩展名/声道/采样率（导入剪映与
+    原视频对轨用），与 trim_audio（16k mono，喂 ASR）职责不同。
+    返回 (输出路径, 原时长, 修剪后时长)。"""
+    dur = audio_duration_sec(src_path)
+    head = max(0.0, min(float(head_sec or 0), dur / 2))
+    tail = max(0.0, min(float(tail_sec or 0), dur / 2))
+    keep = dur - head - tail
+    if keep <= 0.1:
+        raise ValueError(f"裁剪参数过大：原音频 {dur:.1f}s，头 {head}s + 尾 {tail}s 后没有剩余内容")
+    root, ext = os.path.splitext(src_path)
+    if not ext:
+        ext = ".wav"
+    out_path = root + ".cut" + ext
+    cmd = ["ffmpeg", "-y", "-v", "error", "-ss", f"{head:.3f}", "-i", src_path,
+           "-t", f"{keep:.3f}", "-c:a", _audio_codec(ext), "-b:a", "192k", out_path]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"ffmpeg 裁剪失败: {r.stderr[:200]}")
+    return out_path, dur, audio_duration_sec(out_path)
+
+
+def _audio_codec(ext):
+    return {".mp3": "libmp3lame", ".m4a": "aac", ".aac": "aac",
+            ".flac": "flac", ".ogg": "libvorbis"}.get(ext.lower(), "pcm_s16le")
+
+
 def effective_default_source(cfg):
     """读默认来源：键丢失/非法（配置文件丢失同理）→ 回退 draft，不落盘。"""
     v = (cfg or {}).get("default_srt_source", DEFAULT_SOURCE)

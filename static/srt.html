@@ -94,6 +94,7 @@
     <textarea id="out" class="mono" placeholder="校正后的 SRT 会显示在这里"></textarea>
     <div class="row">
       <button id="dlBtn" disabled>⬇️ 下载修正版 .srt</button>
+      <button id="dlAudioBtn" disabled style="display:none" title="与 SRT 同一裁剪参数，时间轴对齐，可一起导入剪映">🎧 下载裁剪后音频</button>
       <span class="hint" style="margin:0">剪映里：文本 → 字幕 → 导入字幕（或拖入 SRT）→ 删除旧字幕轨</span>
     </div>
   </div>
@@ -111,6 +112,7 @@ async function init() {
   $('#scriptFile').onchange = e => readFile(e, $('#script'));
   $('#goBtn').onclick = calibrate;
   $('#dlBtn').onclick = download;
+  $('#dlAudioBtn').onclick = downloadCutAudio;
   $('#cfgBtn').onclick = openCfg;
   $('#cfgProvider').onchange = () => { applyPreset(); showTips($('#cfgProvider').value); };
   $('#cfgEye').onclick = toggleKeyEye;
@@ -199,6 +201,9 @@ async function runAsr() {
     $('#srt').value = r.srt;
     $('#status').textContent = `转写完成：${r.count} 条字幕（${r.language}，裁剪后 ${r.kept_sec}s）`;
     $('#status').className = 'ok';
+    // 设置了裁剪 → ④ 区同时提供裁剪后音频下载（与 SRT 时间轴对齐）
+    const head = parseFloat($('#headSec').value) || 0, tail = parseFloat($('#tailSec').value) || 0;
+    $('#dlAudioBtn').style.display = (head > 0 || tail > 0) ? '' : 'none';
   } catch (e) {
     $('#status').textContent = '转写失败: ' + e;
     $('#status').className = 'err';
@@ -373,6 +378,26 @@ function download() {
   a.download = name.replace(/[\\/:*?"<>|\s]+/g, '_') + '_修正.srt';
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+async function downloadCutAudio() {
+  if (!audioPath) return;
+  try {
+    const r = await (await fetch('/api/audio/download_cut', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ audio_path: audioPath,
+                             head_sec: parseFloat($('#headSec').value) || 0,
+                             tail_sec: parseFloat($('#tailSec').value) || 0 })
+    })).json();
+    if (!r.ok) { $('#status').textContent = r.error; $('#status').className = 'err'; return; }
+    const a = document.createElement('a');
+    a.href = r.download_url;
+    a.download = r.filename;
+    a.click();
+  } catch (e) {
+    $('#status').textContent = '音频下载失败: ' + e;
+    $('#status').className = 'err';
+  }
 }
 
 init();

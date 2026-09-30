@@ -8,8 +8,9 @@ import os
 import re
 import sys
 import time
+from urllib.parse import quote
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, send_file
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import draft  # noqa: E402
@@ -101,6 +102,38 @@ def api_srt_default_source():
     cfg = ai_subfix.load_config()
     return jsonify({"ok": True, "default_source": audio_io.effective_default_source(cfg),
                     "persisted": "default_srt_source" in cfg})
+
+
+@app.route("/api/audio/download_cut", methods=["POST"])
+def api_audio_download_cut():
+    """按当前头/尾秒数裁剪音频供下载（保持原格式），body = {audio_path, head_sec, tail_sec}。
+    与 SRT 同源同参数 → 时间轴对齐，SRT 和音频可一起导入剪映。"""
+    body = request.get_json(force=True)
+    path = body.get("audio_path", "")
+    if not path or not os.path.isfile(path):
+        return jsonify({"ok": False, "error": "音频不存在，请先上传"}), 400
+    try:
+        out, dur, keep = audio_io.trim_audio_for_download(
+            path, body.get("head_sec", 0), body.get("tail_sec", 0))
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except RuntimeError as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    basename = os.path.splitext(os.path.basename(path))[0].rsplit(".", 0)[0] or "audio"
+    return jsonify({"ok": True, "download_url": f"/api/audio/file?path={quote(out)}",
+                    "filename": f"{basename}_裁剪{os.path.splitext(out)[1]}",
+                    "kept_sec": round(keep, 1)})
+
+
+@app.route("/api/audio/file")
+def api_audio_file():
+    """下载服务端生成的音频文件（仅限 uploads/ 目录，防路径穿越）。"""
+    from urllib.parse import unquote
+    path = unquote(request.args.get("path", ""))
+    updir = os.path.abspath(audio_io.UPLOAD_DIR)
+    if not os.path.abspath(path).startswith(updir + os.sep) or not os.path.isfile(path):
+        return jsonify({"ok": False, "error": "文件不存在"}), 404
+    return send_file(path, as_attachment=True)
 
 
 @app.route("/api/health")
