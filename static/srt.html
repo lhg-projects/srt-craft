@@ -14,14 +14,30 @@
 <header>
   <button class="ghost" id="cfgBtn" style="padding:5px 12px;font-size:13px">⚙️ AI 设置（可选）</button>
 </header>
-<dialog id="cfgDialog">
+<dialog id="cfgDialog" style="width:720px;max-width:94vw">
   <h3>⚙️ AI 校正设置（可选）</h3>
-  <div class="hint" style="margin:0 0 12px">不配置也能用：拼音对齐和重建模式完全本地运行。AI 模式需要任意 OpenAI 兼容服务（密钥只保存在本机 config.json）。</div>
-  <select id="cfgProvider"></select>
-  <input type="text" id="cfgUrl" placeholder="API 地址，如 https://api.openai.com/v1">
-  <input type="text" id="cfgModel" placeholder="模型名，如 gpt-4o-mini">
-  <input type="password" id="cfgKey" placeholder="API 密钥（留空表示不修改）">
-  <div class="actions">
+  <div class="hint" style="margin:0 0 12px">不配置也能用：拼音对齐完全本地运行。AI 模式支持多家供应商（密钥只保存在本机 config.json）。</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+    <div>
+      <div class="hint" style="margin:0 0 4px">大模型供应商</div>
+      <select id="cfgProvider"></select>
+      <div class="hint" style="margin:10px 0 4px">API Key</div>
+      <div style="position:relative">
+        <input type="password" id="cfgKey" placeholder="API 密钥（留空表示不修改）" style="padding-right:38px">
+        <button type="button" id="cfgEye" title="显示/隐藏密钥" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:transparent;border:none;padding:4px 6px;font-size:14px;color:var(--text-faint)">👁</button>
+      </div>
+      <div class="hint" style="margin:10px 0 4px">Base Url</div>
+      <input type="text" id="cfgUrl" placeholder="API 地址，如 https://api.openai.com/v1">
+      <div class="hint" style="margin:10px 0 4px">模型名称</div>
+      <input type="text" id="cfgModel" placeholder="模型名，如 gpt-4o-mini">
+      <div class="row" style="margin-top:14px">
+        <button class="ghost" id="cfgTest">⚡ 测试模型连接</button>
+        <span id="cfgTestResult" class="hint" style="margin:0"></span>
+      </div>
+    </div>
+    <div id="cfgTips" style="background:var(--accent-soft);border:1px solid var(--accent-border);border-radius:12px;padding:12px 14px;font-size:13px;line-height:1.9;color:var(--text)"></div>
+  </div>
+  <div class="actions" style="margin-top:16px">
     <button class="ghost" onclick="cfgDialog.close()">取消</button>
     <button id="cfgSave">保存</button>
   </div>
@@ -72,7 +88,9 @@ async function init() {
   $('#goBtn').onclick = calibrate;
   $('#dlBtn').onclick = download;
   $('#cfgBtn').onclick = openCfg;
-  $('#cfgProvider').onchange = applyPreset;
+  $('#cfgProvider').onchange = () => { applyPreset(); showTips($('#cfgProvider').value); };
+  $('#cfgEye').onclick = toggleKeyEye;
+  $('#cfgTest').onclick = testConnection;
   $('#cfgSave').onclick = saveCfg;
   // 判定依据：有原稿 → 拼音对齐（有参照系，本地秒级）为主，AI 可选；
   // 无原稿 → 没有对齐参照系，拼音对齐不成立，必须走 AI 语义校对（锁定勾选，服务端二次强制）
@@ -107,7 +125,43 @@ async function openCfg() {
   $('#cfgKey').value = '';
   $('#cfgKey').placeholder = r.ai_api_key_set ? '已保存（留空表示不修改）' : 'API 密钥';
   window.wasKeySet = r.ai_api_key_set;
+  showTips($('#cfgProvider').value);
+  $('#cfgTestResult').textContent = '';
   cfgDialog.showModal();
+}
+
+function showTips(pid) {
+  const p = PROVIDERS.find(x => x.id === pid);
+  $('#cfgTips').innerHTML = p
+    ? `<b>${p.label} 配置说明</b><br>${(p.tips || '').replace(/\n/g, '<br>')}`
+    : '';
+}
+
+// 密钥可见性切换
+function toggleKeyEye() {
+  const k = $('#cfgKey');
+  k.type = k.type === 'password' ? 'text' : 'password';
+}
+
+// 测试模型连接：先保存（保证测的就是表单里填的），再发最小请求
+async function testConnection() {
+  const btn = $('#cfgTest'), out = $('#cfgTestResult');
+  btn.disabled = true; out.textContent = '测试中…'; out.style.color = 'var(--text-dim)';
+  await saveCfg({ silent: true });
+  try {
+    const r = await (await fetch('/api/ai/test', { method: 'POST' })).json();
+    if (r.ok) {
+      out.textContent = `✅ 连接成功（${r.elapsed}s）`;
+      out.style.color = 'var(--ok)';
+    } else {
+      out.textContent = '❌ ' + (r.error || '连接失败');
+      out.style.color = 'var(--err)';
+    }
+  } catch (e) {
+    out.textContent = '❌ ' + e;
+    out.style.color = 'var(--err)';
+  }
+  btn.disabled = false;
 }
 
 function applyPreset() {
@@ -115,16 +169,20 @@ function applyPreset() {
   if (p) { $('#cfgUrl').value = p.base_url; $('#cfgModel').value = p.model; }
 }
 
-async function saveCfg() {
+async function saveCfg(opts = {}) {
   const body = { ai_provider: $('#cfgProvider').value, ai_base_url: $('#cfgUrl').value, ai_model: $('#cfgModel').value };
   if ($('#cfgKey').value.trim()) {
-    if (wasKeySet && !confirm("将覆盖已保存的 API 密钥，确认？")) return;
+    if (wasKeySet && !opts.silent && !confirm("将覆盖已保存的 API 密钥，确认？")) return;
     body.ai_api_key = $('#cfgKey').value.trim();
   }
   const r = await (await fetch('/api/config', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body)
   })).json();
+  window.wasKeySet = r.ai_api_key_set;
+  $('#cfgKey').value = '';
+  $('#cfgKey').placeholder = r.ai_api_key_set ? '已保存（留空表示不修改）' : 'API 密钥';
+  if (opts.silent) return;
   cfgDialog.close();
   $('#status').textContent = r.ai_api_key_set ? '✅ AI 配置已保存' : '已保存（AI 密钥未设置，AI 模式不可用）';
   $('#status').className = r.ai_api_key_set ? 'ok' : '';

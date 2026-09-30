@@ -26,6 +26,47 @@ PROVIDERS = {
     "custom":    {"label": "自定义（OpenAI 兼容）", "base_url": "",                                    "model": "openai/…"},
 }
 
+# 每家供应商的配置说明（借鉴 MoneyPrinterTurbo 的 provider tips 卡）：
+# key 去哪申请、base_url 规则、默认模型。前端「⚙️ AI 设置」右侧说明卡展示。
+PROVIDER_TIPS = {
+    "openai": "API Key 在 platform.openai.com/api-keys 创建。Base Url 留空即官方地址；"
+              "国内访问需要代理。默认模型 gpt-4o-mini，可换成账号支持的其它模型。",
+    "deepseek": "API Key 在 platform.deepseek.com 创建。Base Url 用 https://api.deepseek.com"
+                "（已预填）。默认 deepseek-chat，价格低、中文效果好。",
+    "moonshot": "API Key 在 platform.moonshot.cn 创建。Base Url 用 https://api.moonshot.cn/v1"
+                "（已预填）。默认 moonshot-v1-8k，长字幕可换 moonshot-v1-32k。",
+    "zhipu": "API Key 在 open.bigmodel.cn 创建（个人可免费领 glm-4-flash 额度）。"
+             "Base Url 用 https://open.bigmodel.cn/api/paas/v4（已预填）。",
+    "ark": "火山方舟（豆包）：在 console.volcengine.com/ark 开通模型并创建 API Key。"
+           "Base Url 填你的接入点地址（形如 https://ark.cn-beijing.volces.com/api/v3）；"
+           "模型名填你在方舟开通的模型 ID 或推理接入点 ID。",
+    "anthropic": "API Key 在 console.anthropic.com 创建。Base Url 留空即官方地址；"
+                 "国内访问需要代理。默认 claude-3-5-haiku（快且便宜）。",
+    "ollama": "本地运行、免密钥：先安装 ollama 并 `ollama pull qwen2.5`，"
+              "Base Url 保持 http://localhost:11434。模型名填已 pull 的模型。",
+    "custom": "任何 OpenAI 兼容服务（MiniMax / 阶跃 / siliconflow / 中转站等）："
+              "填服务方的 Base Url（通常以 /v1 结尾）和密钥，模型名以服务方文档为准。"
+              "请确保 API Key 与 Base Url 来自同一平台，否则会鉴权失败。",
+}
+
+
+def test_connection(cfg=None):
+    """最小请求验证 AI 链路真实可用（借鉴 MoneyPrinterTurbo 的 test_connection：
+    复用与正式校正完全相同的调用路径，但只发一条 "Reply with exactly: OK"）。
+    返回 (成功, 错误信息, 耗时秒)。"""
+    import time
+    cfg = cfg or load_config()
+    started = time.perf_counter()
+    try:
+        out = _chat(cfg, [{"role": "user", "content": "Reply with exactly: OK"}],
+                    max_tokens=16, timeout=60)
+        elapsed = time.perf_counter() - started
+        if not out.strip():
+            return False, "模型返回了空响应", elapsed
+        return True, "", elapsed
+    except Exception as e:
+        return False, f"{type(e).__name__}: {str(e)[:200]}", time.perf_counter() - started
+
 SYSTEM_PROMPT = """你是字幕校准助手。给你两份文本：
 1.【字幕】语音识别的结果，可能有同音错字、漏字、多字、字符错位
 2.【文稿】正确的原始文稿（与字幕内容一致，可能有少量后期改写）

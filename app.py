@@ -62,8 +62,19 @@ def api_config():
         "ai_model": cfg.get("ai_model", ""),
         "ai_api_key_set": bool(cfg.get("ai_api_key")),
         "providers": [{"id": k, "label": v["label"], "base_url": v["base_url"],
-                       "model": v["model"]} for k, v in ai_subfix.PROVIDERS.items()],
+                       "model": v["model"],
+                       "tips": ai_subfix.PROVIDER_TIPS.get(k, "")}
+                      for k, v in ai_subfix.PROVIDERS.items()],
     })
+
+
+@app.route("/api/ai/test", methods=["POST"])
+def api_ai_test():
+    """测试模型连接：用**已保存**的配置发一次最小请求（"Reply with exactly: OK"），
+    返回 (成功, 错误信息, 耗时秒)。前端流程 = 先保存再测试，保证测的就是表单里填的。"""
+    import ai_subfix
+    ok, err, elapsed = ai_subfix.test_connection()
+    return jsonify({"ok": ok, "error": err, "elapsed": round(elapsed, 2)})
 
 
 # ---------- SRT 校正 ----------
