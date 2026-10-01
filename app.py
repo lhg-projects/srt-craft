@@ -154,6 +154,34 @@ def api_audio_download_cut():
                     "kept_sec": round(audio_io.audio_duration_sec(path), 1)})
 
 
+@app.route("/api/audio/download_all", methods=["POST"])
+def api_audio_download_all():
+    """一键打包下载：修正版 SRT + 处理后音频 → zip。
+    body = {audio_path, srt, name}；zip 内容 <名>_修正.srt + <名>_处理音频<ext>。"""
+    import io
+    import zipfile
+    body = request.get_json(force=True)
+    path = body.get("audio_path", "")
+    srt_text = body.get("srt", "")
+    if not srt_text.strip():
+        return jsonify({"ok": False, "error": "还没有修正版 SRT，请先完成校正"}), 400
+    if not path or not os.path.isfile(path):
+        return jsonify({"ok": False, "error": "音频不存在，请先上传"}), 400
+    name = re.sub(r'[\\/:*?"<>|\s]+', "_", body.get("name") or "subtitles")[:60] or "subtitles"
+    basename = os.path.splitext(os.path.basename(path))[0]
+    clean = re.sub(r"\.(trimmed|x[\d.]+)$", "", basename) or "audio"
+    ext = os.path.splitext(path)[1] or ".wav"
+    speed = re.search(r"\.x([\d.]+)$", basename)
+    label = f"_处理{speed.group(1)}x" if speed else "_处理"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(f"{name}_修正.srt", srt_text)
+        z.write(path, f"{clean}{label}{ext}")
+    buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name=f"{name}_字幕音频打包.zip",
+                     mimetype="application/zip")
+
+
 @app.route("/api/audio/file")
 def api_audio_file():
     """下载服务端生成的音频文件（仅限 uploads/ 目录，防路径穿越）。"""

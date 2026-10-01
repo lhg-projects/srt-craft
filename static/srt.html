@@ -112,6 +112,7 @@
     <div class="row">
       <button id="dlBtn" disabled>⬇️ 下载修正版 .srt</button>
       <button id="dlAudioBtn" disabled style="display:none" title="与 SRT 同一裁剪参数，时间轴对齐，可一起导入剪映">🎧 下载裁剪后音频</button>
+      <button id="dlAllBtn" disabled style="display:none" title="SRT + 处理后音频打包成一个 zip，解压后一起导入剪映">📦 一键下载（SRT + 音频）</button>
       <span class="hint" style="margin:0">剪映里：文本 → 字幕 → 导入字幕（或拖入 SRT）→ 删除旧字幕轨</span>
     </div>
   </div>
@@ -130,6 +131,7 @@ async function init() {
   $('#goBtn').onclick = calibrate;
   $('#dlBtn').onclick = download;
   $('#dlAudioBtn').onclick = downloadCutAudio;
+  $('#dlAllBtn').onclick = downloadAll;
   $('#cfgBtn').onclick = openCfg;
   $('#cfgProvider').onchange = () => { applyPreset(); showTips($('#cfgProvider').value); };
   $('#cfgEye').onclick = toggleKeyEye;
@@ -201,12 +203,17 @@ function applySource() {
 }
 
 function refreshAudioBtn() {
-  // 「下载裁剪后音频」：音频来源 + 设置了头/尾裁剪 + 已上传音频 → 可用
+  // 「下载裁剪后音频」「一键下载」：音频来源 + 设置了头/尾裁剪或变速 + 已上传音频 → 可用
+  const hasProcess = ((parseFloat($('#headSec').value) || 0) > 0 ||
+                      (parseFloat($('#tailSec').value) || 0) > 0 ||
+                      (parseFloat($('#speedX').value) || 1) !== 1);
+  const armed = $('#srcSel').value === 'audio' && !!audioPath && hasProcess;
   const btn = $('#dlAudioBtn');
-  const armed = $('#srcSel').value === 'audio' && !!audioPath &&
-    ((parseFloat($('#headSec').value) || 0) > 0 || (parseFloat($('#tailSec').value) || 0) > 0);
   btn.style.display = armed ? '' : 'none';
   btn.disabled = !armed;
+  const allBtn = $('#dlAllBtn');
+  allBtn.style.display = armed ? '' : 'none';
+  allBtn.disabled = !armed || !$('#out').value.trim();  // 还需有修正版 SRT
 }
 
 async function saveDefaultSource() {
@@ -440,6 +447,7 @@ async function calibrate() {
     $('#status').className = r.applied ? 'ok' : '';
     $('#out').value = r.srt;
     $('#dlBtn').disabled = false;
+    refreshAudioBtn();  // out 就绪 → 「一键下载」按钮亮起
     $('#report').innerHTML = !r.changes.length
       ? '<div class="nochange">✅ 未发现需要修改的地方，SRT 与文稿一致。</div>'
       : r.changes.map(c => `<div class="change">
@@ -481,6 +489,37 @@ async function downloadCutAudio() {
     a.click();
   } catch (e) {
     $('#status').textContent = '音频下载失败: ' + e;
+    $('#status').className = 'err';
+  }
+}
+
+async function downloadAll() {
+  if (!audioPath || !$('#out').value.trim()) return;
+  $('#status').textContent = '打包中…';
+  $('#status').className = '';
+  try {
+    // 后端把修正版 SRT + 处理后音频打成 zip，一个下载拿齐两个文件
+    const r = await fetch('/api/audio/download_all', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ audio_path: audioPath, srt: $('#out').value,
+                             name: $('#draftSel').value || 'subtitles' })
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      $('#status').textContent = err.error || '打包失败';
+      $('#status').className = 'err';
+      return;
+    }
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = ($('#draftSel').value || 'subtitles').replace(/[\\/:*?"<>|\s]+/g, '_') + '_字幕音频打包.zip';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    $('#status').textContent = '✅ 已打包下载：修正版 .srt + 处理后音频';
+    $('#status').className = 'ok';
+  } catch (e) {
+    $('#status').textContent = '打包下载失败: ' + e;
     $('#status').className = 'err';
   }
 }
