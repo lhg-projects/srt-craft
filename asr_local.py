@@ -28,6 +28,56 @@ def _ts(sec):
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
+def split_segment(text, start, end, max_chars=25):
+    """把 whisper 的一个 VAD 长段按标点切成 ≤max_chars 字的小条。
+    返回 [(文本, 起秒, 止秒), ...]；时间按字符数线性内插。
+    断句优先级：。！？ > ； > ，——优先在句边界切，其次子句边界；
+    无标点的超长段按字数硬切。"""
+    import re
+    text = text.strip()
+    if len(text) <= max_chars:
+        return [(text, start, end)]
+    # 标点位置 → 优先级（越小越优先切）
+    prio = {ch: i for i, ch in enumerate(["。", "！", "？", "；", "，", ","])}
+    cuts = []  # (位置, 优先级)，切点在标点后
+    for m in re.finditer(r"[。！？；，,]", text):
+        cuts.append((m.end(), prio[m.group()]))
+    pieces = []
+    pos = 0
+    while pos < len(text):
+        chunk = text[pos:pos + max_chars]
+        if pos + max_chars >= len(text):
+            pieces.append(chunk)
+            break
+        # 在本窗口内找优先级最高（数字最小）的切点
+        window = [c for c in cuts if pos + 8 <= c[0] <= pos + max_chars]
+        if window:
+            best = min(window, key=lambda c: (c[1], -c[0]))
+            cut = best[0]
+        else:
+            cut = pos + max_chars  # 硬切
+        pieces.append(text[pos:cut].strip())
+        pos = cut
+    pieces = [p for p in pieces if p]
+    # 字符数比例 → 时间内插
+    total = sum(len(p) for p in pieces)
+    out, t = [], start
+    for p in pieces:
+        dur = (end - start) * len(p) / total
+        out.append((p, t, t + dur))
+        t += dur
+    return out
+
+
+def info_duration(wav_path):
+    """音频时长（秒）：转写响应里展示用，避免把 whisper 再跑一遍。"""
+    import json as _json
+    import subprocess as _sp
+    out = _sp.run(["ffprobe", "-v", "quiet", "-print_format", "json",
+                   "-show_format", wav_path], capture_output=True, text=True).stdout
+    return float(_json.loads(out or "{}").get("format", {}).get("duration", 0))
+
+
 def transcribe_to_srt(wav_path, cfg=None, initial_prompt=None):
     """音频 → 粗稿 SRT。返回 (srt 文本, 语言, 总时长)。
     initial_prompt 缺省给金融口播热词（本工具的目标场景），显著减少
@@ -41,7 +91,13 @@ def transcribe_to_srt(wav_path, cfg=None, initial_prompt=None):
         initial_prompt=initial_prompt or _default_prompt,
         vad_filter=True)
     parts = []
-    for i, seg in enumerate(segments, 1):
-        parts.append(f"{i}\n{_ts(seg.start)} --> {_ts(seg.end)}\n{seg.text.strip()}")
+    i = 0
+    for seg in segments:
+        # 长段按标点断句（whisper VAD 一口气给 25s+ 的段，导入剪映糊满全屏）
+        for text, s, e in split_segment(seg.text.strip(), seg.start, seg.end):
+            if not text:
+                continue
+            i += 1
+            parts.append(f"{i}\n{_ts(s)} --> {_ts(e)}\n{text}")
     srt_text = "\n\n".join(parts) + ("\n" if parts else "")
     return srt_text, info.language, info.duration

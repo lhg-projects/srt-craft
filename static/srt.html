@@ -12,6 +12,14 @@
   /* 报告条数多时内部滚动，避免把 ④ 下载区顶出首屏 */
   #report { max-height: 45vh; overflow-y: auto; overscroll-behavior: contain; }
   #out { height: 200px; }
+  /* 阶段进度条：一条龙运行时 ①转写 ②校正 各一条 */
+  .prog { margin: 8px 0 4px; }
+  .prog .track { height: 6px; border-radius: 3px; background: var(--border, #e2e8f0); overflow: hidden; }
+  .prog .fill { height: 100%; width: 40%; border-radius: 3px;
+    background: linear-gradient(90deg, var(--accent, #4f6bff), #8aa2ff);
+    animation: progslide 1.2s ease-in-out infinite; }
+  .prog .label { font-size: 12px; color: var(--text-dim, #64748b); margin-bottom: 4px; }
+  @keyframes progslide { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
 </style>
 </head>
 <body>
@@ -71,15 +79,24 @@
       <div class="row" style="margin:0 0 10px">
         <label style="font-size:13px">剪掉开头 <input type="number" id="headSec" min="0" step="0.5" value="0" style="width:64px"> 秒</label>
         <label style="font-size:13px">剪掉结尾 <input type="number" id="tailSec" min="0" step="0.5" value="0" style="width:64px"> 秒</label>
+        <label style="font-size:13px" title="变速不变调；处理完成后才进入转写">倍速 <input type="number" id="speedX" min="0.5" max="2" step="0.1" value="1.1" style="width:56px"> ×</label>
         <button class="ghost" id="asrBtn" disabled>🎙️ 生成 SRT（whisper）</button>
       </div>
-      <div class="hint" style="margin:0 0 8px">上传音频 → 剪掉开头/结尾（去口误与寒暄）→ 本地 whisper 转写成 SRT 填入下方。首次使用会下载 whisper 模型，耗时较长。</div>
+      <div class="hint" style="margin:0 0 8px">上传音频 → 剪掉开头/结尾 → 变速（默认 1.1×，不变调）→ 本地 whisper 转写成 SRT 填入下方。改参数后重新选择文件即可重跑。首次使用会下载 whisper 模型。</div>
+    </div>
+    <div id="progAsr" class="prog" style="display:none">
+      <div class="label" id="progAsrLabel">音频处理 → whisper 转写中…</div>
+      <div class="track"><div class="fill"></div></div>
     </div>
     <textarea id="srt" class="mono" placeholder="粘贴标准 SRT 内容：&#10;1&#10;00:00:00,100 --> 00:00:02,500&#10;字幕文本"></textarea>
     <div class="hint">支持剪映「导出字幕」生成的 SRT，时间轴会原样保留，校正只改文本。</div>
     <h2 style="margin-top:16px">② 原始文稿（正确版 · 无原稿可留空）</h2>
     <input type="file" id="scriptFile" accept=".txt,.md">
     <textarea id="script" style="margin-top:8px" placeholder="粘贴你写的原始文稿，或点击上面选择 .txt 文件上传；无原稿可留空（自动使用 AI 校对）"></textarea>
+    <div id="progCal" class="prog" style="display:none">
+      <div class="label" id="progCalLabel">AI 校正中…</div>
+      <div class="track"><div class="fill"></div></div>
+    </div>
     <div class="row">
       <label style="font-size:13px" title="默认模式（不用AI）：同音错字/漏字/标点，秒级完成"><input type="checkbox" id="phonetic" checked> 📢 拼音对齐（默认）</label>
       <label style="font-size:13px" title="调用大模型语义修复，最准确；长字幕需 1-4 分钟。无原稿时必须使用且自动勾选"><input type="checkbox" id="aiMode"> 🤖 AI 校正<span id="aiMust" style="color:var(--warn);display:none">（无原稿必选）</span></label>
@@ -134,8 +151,11 @@ async function initSource() {
   $('#srcReset').onclick = async () => {
     await fetch('/api/srt/default_source', { method: 'DELETE' });
     $('#srcSel').value = 'draft';
+    $('#headSec').value = 0;
+    $('#tailSec').value = 0;
+    audioPath = '';
     applySource();
-    $('#status').textContent = '已恢复默认来源：从草稿生成';
+    $('#status').textContent = '已恢复默认：草稿来源，不裁剪';
     $('#status').className = '';
   };
   $('#audioFile').onchange = uploadAudio;
@@ -144,17 +164,49 @@ async function initSource() {
   try {
     const r = await (await fetch('/api/srt/default_source')).json();
     $('#srcSel').value = r.default_source;
+    $('#headSec').value = r.head_sec || 0;
+    $('#tailSec').value = r.tail_sec || 0;
     localStorage.setItem('srt_default_source', r.default_source);
   } catch (e) {
     $('#srcSel').value = localStorage.getItem('srt_default_source') || 'draft';
   }
   applySource();
+  // 剪掉头/尾秒数：用户设定后持久化（刷新不丢），恢复默认/配置丢失 → 0
+  let clipTimer = null;
+  const persistClip = () => {
+    clearTimeout(clipTimer);
+    clipTimer = setTimeout(() => {
+      fetch('/api/srt/default_source', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ head_sec: parseFloat($('#headSec').value) || 0,
+                               tail_sec: parseFloat($('#tailSec').value) || 0 })
+      });
+    }, 400);
+  };
+  $('#headSec').addEventListener('input', () => { refreshAudioBtn(); persistClip(); });
+  $('#tailSec').addEventListener('input', () => { refreshAudioBtn(); persistClip(); });
 }
 
 function applySource() {
   const isAudio = $('#srcSel').value === 'audio';
   $('#srcDraft').style.display = isAudio ? 'none' : '';
   $('#srcAudio').style.display = isAudio ? '' : 'none';
+  // 音频流程（whisper 粗稿错字偏多）默认拼音对齐 + AI 校正双开；
+  // 无原稿时 syncAiRequirement 仍会强制锁定 AI（判定依据不变）
+  if (isAudio) {
+    $('#phonetic').checked = true;
+    if (!$('#script').value.trim()) $('#aiMode').checked = true;
+  }
+  refreshAudioBtn();
+}
+
+function refreshAudioBtn() {
+  // 「下载裁剪后音频」：音频来源 + 设置了头/尾裁剪 + 已上传音频 → 可用
+  const btn = $('#dlAudioBtn');
+  const armed = $('#srcSel').value === 'audio' && !!audioPath &&
+    ((parseFloat($('#headSec').value) || 0) > 0 || (parseFloat($('#tailSec').value) || 0) > 0);
+  btn.style.display = armed ? '' : 'none';
+  btn.disabled = !armed;
 }
 
 async function saveDefaultSource() {
@@ -166,49 +218,66 @@ async function saveDefaultSource() {
   });
 }
 
+// ---------- ①/② 进度条：阶段式（转写/校正为单请求，用动画条+阶段文案表达"在工作"） ----------
+
+function progShow(id, labelId, text) {
+  $('#' + labelId).textContent = text;
+  $('#' + id).style.display = '';
+}
+function progHide(id) { $('#' + id).style.display = 'none'; }
+
 async function uploadAudio(e) {
   const f = e.target.files[0];
   if (!f) return;
-  $('#audioInfo').textContent = '上传中…';
+  $('#audioInfo').textContent = '处理中（裁剪+变速）…';
   $('#asrBtn').disabled = true;
   const fd = new FormData();
   fd.append('audio', f);
+  fd.append('head_sec', $('#headSec').value || 0);
+  fd.append('tail_sec', $('#tailSec').value || 0);
+  fd.append('speed', $('#speedX').value || 1.1);
   try {
     const r = await (await fetch('/api/audio/prepare', { method: 'POST', body: fd })).json();
     if (!r.ok) { $('#audioInfo').textContent = '❌ ' + r.error; return; }
     audioPath = r.audio_path;
-    $('#audioInfo').textContent = `✅ 时长 ${r.duration_sec}s`;
+    const sped = r.speed && r.speed !== 1 ? `，${r.speed}× 后 ${r.speed_dur_sec}s` : '';
+    $('#audioInfo').textContent = `✅ 原始 ${r.duration_sec}s → 裁剪后 ${r.kept_sec}s${sped}`;
     $('#asrBtn').disabled = false;
+    refreshAudioBtn();
   } catch (err) {
     $('#audioInfo').textContent = '❌ 上传失败: ' + err;
   }
 }
 
-async function runAsr() {
-  if (!audioPath) return;
-  $('#status').textContent = 'whisper 转写中…（首次使用需下载模型，请耐心等待）';
-  $('#status').className = '';
+async function runAsr(opts = {}) {
+  if (!audioPath) return false;
+  if (!opts.quiet) {
+    $('#status').textContent = 'whisper 转写中…（首次使用需下载模型，请耐心等待）';
+    $('#status').className = '';
+  }
   $('#asrBtn').disabled = true;
+  progShow('progAsr', 'progAsrLabel', `whisper 转写中… 音频 ${$('#audioInfo').textContent.match(/(\d+(?:\.\d+)?)s(?!\S*s)/)?.[1] || ''}s，长音频约 0.5-2 分钟`);
   try {
-    // 头/尾秒数在点击生成时读取：改完数字无需重新上传，直接再点即可
+    // prepare 已完成裁剪+变速，这里只转写
     const r = await (await fetch('/api/audio/transcribe', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ audio_path: audioPath,
-                             head_sec: parseFloat($('#headSec').value) || 0,
-                             tail_sec: parseFloat($('#tailSec').value) || 0 })
+      body: JSON.stringify({ audio_path: audioPath })
     })).json();
-    if (!r.ok) { $('#status').textContent = r.error; $('#status').className = 'err'; return; }
+    if (!r.ok) { $('#status').textContent = r.error; $('#status').className = 'err'; return false; }
     $('#srt').value = r.srt;
-    $('#status').textContent = `转写完成：${r.count} 条字幕（${r.language}，裁剪后 ${r.kept_sec}s）`;
-    $('#status').className = 'ok';
-    // 设置了裁剪 → ④ 区同时提供裁剪后音频下载（与 SRT 时间轴对齐）
-    const head = parseFloat($('#headSec').value) || 0, tail = parseFloat($('#tailSec').value) || 0;
-    $('#dlAudioBtn').style.display = (head > 0 || tail > 0) ? '' : 'none';
+    if (!opts.quiet) {
+      $('#status').textContent = `转写完成：${r.count} 条字幕（${r.language}，音频 ${r.kept_sec}s）`;
+      $('#status').className = 'ok';
+    }
+    refreshAudioBtn();
+    return true;
   } catch (e) {
     $('#status').textContent = '转写失败: ' + e;
     $('#status').className = 'err';
+    return false;
   } finally {
     $('#asrBtn').disabled = false;
+    progHide('progAsr');
   }
 }
 
@@ -323,6 +392,17 @@ async function genSrt() {
 }
 
 async function calibrate() {
+  // 音频来源：没点过「生成 SRT」也不要紧——SRT 框是空的就自动先裁剪+转写，
+  // 再接着校正（一条龙）；SRT 框已有内容（含手动粘贴）则尊重现有内容
+  if ($('#srcSel').value === 'audio' && !$('#srt').value.trim()) {
+    if (!audioPath) {
+      $('#status').textContent = '请先选择音频文件';
+      $('#status').className = 'err';
+      return;
+    }
+    const ok = await runAsr({ quiet: true });
+    if (!ok) return;  // 转写失败，runAsr 已把错误写进状态区
+  }
   const srt = $('#srt').value.trim();
   const script = $('#script').value.trim();
   if (!srt) {
@@ -337,16 +417,20 @@ async function calibrate() {
              : $('#aiMode').checked ? '（AI 校正，长字幕约 1-4 分钟）' : '（拼音对齐）';
   $('#status').textContent = '校正中…' + mode;
   $('#status').className = '';
+  if ($('#aiMode').checked || noScript) {
+    progShow('progCal', 'progCalLabel', 'AI 校正中… 分批送模型，长字幕约 1-4 分钟');
+  }
   try {
     const r = await (await fetch('/api/srt/calibrate', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
         srt: srt, script: script,
-        phonetic: $('#phonetic').checked && !$('#aiMode').checked && !noScript,
+        phonetic: $('#phonetic').checked && !noScript,
         ai: $('#aiMode').checked || noScript,
       })
     })).json();
     $('#goBtn').disabled = false;
+    progHide('progCal');
     if (!r.ok) {
       $('#status').textContent = r.error || '校正失败';
       $('#status').className = 'err';
@@ -367,6 +451,8 @@ async function calibrate() {
     $('#goBtn').disabled = false;
     $('#status').textContent = '校正失败: ' + e;
     $('#status').className = 'err';
+  } finally {
+    progHide('progCal');
   }
 }
 
@@ -383,11 +469,10 @@ function download() {
 async function downloadCutAudio() {
   if (!audioPath) return;
   try {
+    // prepare 已处理完（裁剪+变速），直接下载该成品
     const r = await (await fetch('/api/audio/download_cut', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ audio_path: audioPath,
-                             head_sec: parseFloat($('#headSec').value) || 0,
-                             tail_sec: parseFloat($('#tailSec').value) || 0 })
+      body: JSON.stringify({ audio_path: audioPath })
     })).json();
     if (!r.ok) { $('#status').textContent = r.error; $('#status').className = 'err'; return; }
     const a = document.createElement('a');

@@ -42,24 +42,37 @@ def favicon_ico():
 
 @app.route("/api/audio/prepare", methods=["POST"])
 def api_audio_prepare():
-    """上传音频 → 保存原文件 → 返回时长。body = multipart {audio}。
-    裁剪不在这一步做：头/尾秒数以点击「生成 SRT」时的输入为准。"""
+    """上传音频 → 裁剪（头/尾秒数）→ 变速（默认 1.1x，atempo 不变调）
+    → 处理链完成才返回，供后续转写/下载。body = multipart {audio, head_sec, tail_sec, speed}"""
     f = request.files.get("audio")
     if not f or not f.filename:
         return jsonify({"ok": False, "error": "没有音频文件"}), 400
     try:
         path = audio_io.save_upload(f)
-        dur = audio_io.audio_duration_sec(path)
+        raw_dur = audio_io.audio_duration_sec(path)
+        trimmed, dur, keep = audio_io.trim_audio(
+            path, request.form.get("head_sec", 0), request.form.get("tail_sec", 0))
+        speed = request.form.get("speed") or audio_io.DEFAULT_SPEED
+        sped, sped_dur = audio_io.change_speed(trimmed, speed)
+        if sped != trimmed:
+            os.remove(trimmed)  # 中间产物不保留，下载/转写统一用变速后的
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except RuntimeError as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
     except Exception as e:
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
-    return jsonify({"ok": True, "audio_path": path, "duration_sec": round(dur, 1)})
+    return jsonify({"ok": True, "audio_path": sped,
+                    "duration_sec": round(raw_dur, 1),
+                    "kept_sec": round(keep, 1),
+                    "speed": float(speed),
+                    "speed_dur_sec": round(sped_dur, 1)})
 
 
 @app.route("/api/audio/transcribe", methods=["POST"])
 def api_audio_transcribe():
-    """按当前头/尾秒数裁剪 → whisper 粗稿 SRT。
-    body = {audio_path, head_sec, tail_sec}。裁剪在本步执行，转写的
-    时间轴从裁剪后音频的 0 开始（填入 ① 即是剪好的稿）。"""
+    """处理链完成的音频（裁剪+变速）→ whisper 粗稿 SRT。
+    body = {audio_path}。转写的时间轴从 0 开始（已对齐变速后音频）。"""
     import ai_subfix
     import asr_local
     body = request.get_json(force=True)
@@ -67,62 +80,78 @@ def api_audio_transcribe():
     if not path or not os.path.isfile(path):
         return jsonify({"ok": False, "error": "音频不存在，请先上传"}), 400
     try:
-        trimmed, dur, keep = audio_io.trim_audio(
-            path, body.get("head_sec", 0), body.get("tail_sec", 0))
-    except ValueError as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
-    except RuntimeError as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-    try:
-        srt_text, lang, _ = asr_local.transcribe_to_srt(trimmed, cfg=ai_subfix.load_config())
+        srt_text, lang, _ = asr_local.transcribe_to_srt(path, cfg=ai_subfix.load_config())
     except ImportError:
         return jsonify({"ok": False, "error": "未安装 faster-whisper：.venv/bin/pip install faster-whisper",
                         "need_asr_install": True}), 400
     except Exception as e:
         return jsonify({"ok": False, "error": f"转写失败: {type(e).__name__}: {e}"}), 500
     return jsonify({"ok": True, "srt": srt_text, "count": srt_text.count("-->"),
-                    "language": lang, "original_sec": round(dur, 1),
-                    "kept_sec": round(keep, 1)})
+                    "language": lang,
+                    "kept_sec": round(asr_local.info_duration(path), 1)})
 
 
 @app.route("/api/srt/default_source", methods=["GET", "POST", "DELETE"])
 def api_srt_default_source():
-    """① 区块输入来源的用户默认（draft/audio），持久化在 config.json。
-    GET 返回生效默认（丢失/非法 → draft）；POST {source} 记住选择；
-    DELETE = 恢复默认（删键，等同配置丢失）。"""
+    """① 区块的用户默认（来源 + 裁剪秒数），持久化在 config.json。
+    GET 返回生效默认（丢失/非法 → draft/0）；POST {source, head_sec, tail_sec}
+    记住选择；DELETE = 恢复默认（删键，等同配置丢失）。"""
     import ai_subfix
     if request.method == "POST":
-        source = (request.get_json(force=True) or {}).get("source", "")
-        try:
-            audio_io.set_default_source(source, ai_subfix.load_config, ai_subfix.save_config)
-        except ValueError as e:
-            return jsonify({"ok": False, "error": str(e)}), 400
+        body = request.get_json(force=True) or {}
+        source = body.get("source", "")
+        if source:
+            try:
+                audio_io.set_default_source(source, ai_subfix.load_config, ai_subfix.save_config)
+            except ValueError as e:
+                return jsonify({"ok": False, "error": str(e)}), 400
+        # 裁剪秒数：用户设定后一直保持（刷新不丢），恢复默认/配置丢失 → 0
+        # 请求键是短名 head_sec/tail_sec，落盘键是 default_clip_*（与 srt-mix 通用）
+        for req_key, key in (("head_sec", "default_clip_head_sec"),
+                             ("tail_sec", "default_clip_tail_sec")):
+            if req_key in body:
+                try:
+                    val = max(0.0, float(body[req_key] or 0))
+                except (TypeError, ValueError):
+                    val = 0.0
+                cfg = ai_subfix.load_config()
+                if val > 0:
+                    cfg[key] = val
+                else:
+                    cfg.pop(key, None)  # 0 = 默认值不落盘
+                ai_subfix.save_config(cfg)
     elif request.method == "DELETE":
-        audio_io.set_default_source("", ai_subfix.load_config, ai_subfix.save_config)
+        import ai_subfix as _a
+        audio_io.set_default_source("", _a.load_config, _a.save_config)
+        cfg = _a.load_config()
+        cfg.pop("default_clip_head_sec", None)
+        cfg.pop("default_clip_tail_sec", None)
+        _a.save_config(cfg)
     cfg = ai_subfix.load_config()
-    return jsonify({"ok": True, "default_source": audio_io.effective_default_source(cfg),
+    return jsonify({"ok": True,
+                    "default_source": audio_io.effective_default_source(cfg),
+                    "head_sec": cfg.get("default_clip_head_sec", 0),
+                    "tail_sec": cfg.get("default_clip_tail_sec", 0),
                     "persisted": "default_srt_source" in cfg})
 
 
 @app.route("/api/audio/download_cut", methods=["POST"])
 def api_audio_download_cut():
-    """按当前头/尾秒数裁剪音频供下载（保持原格式），body = {audio_path, head_sec, tail_sec}。
-    与 SRT 同源同参数 → 时间轴对齐，SRT 和音频可一起导入剪映。"""
+    """下载处理链完成的音频（prepare 已裁剪+变速），body = {audio_path}。
+    与 SRT 同源 → 时间轴对齐，SRT 和音频可一起导入剪映。"""
     body = request.get_json(force=True)
     path = body.get("audio_path", "")
     if not path or not os.path.isfile(path):
         return jsonify({"ok": False, "error": "音频不存在，请先上传"}), 400
-    try:
-        out, dur, keep = audio_io.trim_audio_for_download(
-            path, body.get("head_sec", 0), body.get("tail_sec", 0))
-    except ValueError as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
-    except RuntimeError as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-    basename = os.path.splitext(os.path.basename(path))[0].rsplit(".", 0)[0] or "audio"
-    return jsonify({"ok": True, "download_url": f"/api/audio/file?path={quote(out)}",
-                    "filename": f"{basename}_裁剪{os.path.splitext(out)[1]}",
-                    "kept_sec": round(keep, 1)})
+    basename = os.path.splitext(os.path.basename(path))[0]
+    # 原始上传名（去掉 .trimmed/.x1.1 等后缀）作为下载名
+    clean = re.sub(r"\.(trimmed|x[\d.]+)$", "", basename) or "audio"
+    ext = os.path.splitext(path)[1] or ".wav"
+    speed = re.search(r"\.x([\d.]+)$", basename)
+    label = f"_处理{speed.group(1)}x" if speed else "_处理"
+    return jsonify({"ok": True, "download_url": f"/api/audio/file?path={quote(path)}",
+                    "filename": f"{clean}{label}{ext}",
+                    "kept_sec": round(audio_io.audio_duration_sec(path), 1)})
 
 
 @app.route("/api/audio/file")

@@ -79,6 +79,30 @@ def _audio_codec(ext):
             ".flac": "flac", ".ogg": "libvorbis"}.get(ext.lower(), "pcm_s16le")
 
 
+DEFAULT_SPEED = 1.1
+SPEED_MIN, SPEED_MAX = 0.5, 2.0
+
+
+def change_speed(src_path, speed=DEFAULT_SPEED):
+    """变速不变调（ffmpeg atempo），在裁剪后、转写前执行。
+    speed=1.0 原样返回不处理；输出 wav（喂 ASR 与下载通用）。
+    返回 (输出路径, 新时长秒)。"""
+    speed = float(speed or 1.0)
+    if not (SPEED_MIN <= speed <= SPEED_MAX) or speed == 1.0:
+        if speed != 1.0:
+            raise ValueError(f"变速倍率须在 {SPEED_MIN}~{SPEED_MAX} 之间，当前 {speed}")
+    if speed == 1.0:
+        return src_path, audio_duration_sec(src_path)
+    atempo = f"atempo={speed:.4f}".rstrip("0").rstrip(".")
+    out_path = os.path.splitext(src_path)[0] + f".x{speed:.2f}".rstrip("0").rstrip(".") + ".wav"
+    cmd = ["ffmpeg", "-y", "-v", "error", "-i", src_path,
+           "-filter:a", atempo, "-ar", "16000", "-ac", "1", out_path]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"ffmpeg 变速失败: {r.stderr[:200]}")
+    return out_path, audio_duration_sec(out_path)
+
+
 def effective_default_source(cfg):
     """读默认来源：键丢失/非法（配置文件丢失同理）→ 回退 draft，不落盘。"""
     v = (cfg or {}).get("default_srt_source", DEFAULT_SOURCE)
