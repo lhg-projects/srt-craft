@@ -62,7 +62,10 @@ def api_audio_prepare():
         return jsonify({"ok": False, "error": str(e)}), 500
     except Exception as e:
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
+    # 原始文件名（去扩展名）→ 下载命名用，保持与上传一致
+    orig_name = os.path.splitext(os.path.basename(f.filename or "audio"))[0]
     return jsonify({"ok": True, "audio_path": sped,
+                    "original_name": orig_name,
                     "duration_sec": round(raw_dur, 1),
                     "kept_sec": round(keep, 1),
                     "speed": float(speed),
@@ -137,27 +140,33 @@ def api_srt_default_source():
 
 @app.route("/api/audio/download_cut", methods=["POST"])
 def api_audio_download_cut():
-    """下载处理链完成的音频（prepare 已裁剪+变速），body = {audio_path}。
-    与 SRT 同源 → 时间轴对齐，SRT 和音频可一起导入剪映。"""
+    """下载处理链完成的音频（prepare 已裁剪+变速），body = {audio_path, original_name?}。
+    与 SRT 同源 → 时间轴对齐，SRT 和音频可一起导入剪映。
+    文件名用上传时的原名 + 处理标记，保持一致可认。"""
     body = request.get_json(force=True)
     path = body.get("audio_path", "")
     if not path or not os.path.isfile(path):
         return jsonify({"ok": False, "error": "音频不存在，请先上传"}), 400
-    basename = os.path.splitext(os.path.basename(path))[0]
-    # 原始上传名（去掉 .trimmed/.x1.1 等后缀）作为下载名
-    clean = re.sub(r"\.(trimmed|x[\d.]+)$", "", basename) or "audio"
     ext = os.path.splitext(path)[1] or ".wav"
-    speed = re.search(r"\.x([\d.]+)$", basename)
+    speed = re.search(r"\.x(\d+(?:\.\d+)?)(?=\.\w+$|$)", os.path.basename(path))
     label = f"_处理{speed.group(1)}x" if speed else "_处理"
+    # 原始文件名优先（前端回传），否则从服务端路径尽量还原
+    orig = (body.get("original_name") or "").strip()
+    if not orig:
+        basename = os.path.splitext(os.path.basename(path))[0]
+        orig = re.sub(r"\.\d{4}_\d{6}_[0-9a-f]{6}$", "", basename)  # 去服务端时间戳
+        orig = re.sub(r"\.(trimmed|x[\d.]+)", "", orig) or "audio"
+    orig = re.sub(r'[\\/:*?"<>|\s]+', "_", orig)[:80] or "audio"
     return jsonify({"ok": True, "download_url": f"/api/audio/file?path={quote(path)}",
-                    "filename": f"{clean}{label}{ext}",
+                    "filename": f"{orig}{label}{ext}",
                     "kept_sec": round(audio_io.audio_duration_sec(path), 1)})
 
 
 @app.route("/api/audio/download_all", methods=["POST"])
 def api_audio_download_all():
     """一键打包下载：修正版 SRT + 处理后音频 → zip。
-    body = {audio_path, srt, name}；zip 内容 <名>_修正.srt + <名>_处理音频<ext>。"""
+    body = {audio_path, srt, name, original_name?}；
+    zip 内容 <音频原名>_处理<倍率>x.<ext> + <名>_修正.srt。"""
     import io
     import zipfile
     body = request.get_json(force=True)
@@ -168,15 +177,20 @@ def api_audio_download_all():
     if not path or not os.path.isfile(path):
         return jsonify({"ok": False, "error": "音频不存在，请先上传"}), 400
     name = re.sub(r'[\\/:*?"<>|\s]+', "_", body.get("name") or "subtitles")[:60] or "subtitles"
-    basename = os.path.splitext(os.path.basename(path))[0]
-    clean = re.sub(r"\.(trimmed|x[\d.]+)$", "", basename) or "audio"
     ext = os.path.splitext(path)[1] or ".wav"
-    speed = re.search(r"\.x([\d.]+)$", basename)
+    speed = re.search(r"\.x(\d+(?:\.\d+)?)(?=\.\w+$|$)", os.path.basename(path))
     label = f"_处理{speed.group(1)}x" if speed else "_处理"
+    # 音频沿用上传时的原名（前端回传），SRT 用草稿/默认名
+    orig = (body.get("original_name") or "").strip()
+    if not orig:
+        basename = os.path.splitext(os.path.basename(path))[0]
+        orig = re.sub(r"\.\d{4}_\d{6}_[0-9a-f]{6}$", "", basename)
+        orig = re.sub(r"\.(trimmed|x[\d.]+)", "", orig) or "audio"
+    orig = re.sub(r'[\\/:*?"<>|\s]+', "_", orig)[:80] or "audio"
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(f"{name}_修正.srt", srt_text)
-        z.write(path, f"{clean}{label}{ext}")
+        z.write(path, f"{orig}{label}{ext}")
     buf.seek(0)
     return send_file(buf, as_attachment=True, download_name=f"{name}_字幕音频打包.zip",
                      mimetype="application/zip")
