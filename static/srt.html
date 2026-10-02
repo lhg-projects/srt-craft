@@ -237,6 +237,15 @@ function progHide(id) { $('#' + id).style.display = 'none'; }
 async function uploadAudio(e) {
   const f = e.target.files[0];
   if (!f) return;
+  // 换了新音频 = 新的一轮：清掉上一轮的 SRT/修正版/报告/下载态，
+  // 防止旧转写稿被拿去配新音频的文稿（错位）
+  audioPath = '';
+  audioOriginalName = '';
+  $('#srt').value = '';
+  $('#out').value = '';
+  $('#report').innerHTML = '<div class="hint">校正结果会显示在这里：每一处修改都列出原句与新句，供你核对。</div>';
+  $('#dlBtn').disabled = true;
+  $('#status').textContent = '';
   $('#audioInfo').textContent = '处理中（裁剪+变速）…';
   $('#asrBtn').disabled = true;
   const fd = new FormData();
@@ -253,6 +262,8 @@ async function uploadAudio(e) {
     $('#audioInfo').textContent = `✅ 原始 ${r.duration_sec}s → 裁剪后 ${r.kept_sec}s${sped}`;
     $('#asrBtn').disabled = false;
     refreshAudioBtn();
+    // 自动开始转写（处理链完成后即进入），无需再手动点「生成 SRT」
+    await runAsr();
   } catch (err) {
     $('#audioInfo').textContent = '❌ 上传失败: ' + err;
   }
