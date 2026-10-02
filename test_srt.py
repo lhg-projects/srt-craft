@@ -155,5 +155,46 @@ class TestSrtApi(unittest.TestCase):
         self.assertTrue(r.get_json()["ok"])
 
 
+class TestCalibrateGuards(unittest.TestCase):
+    """AI 校正行级护栏：无标点风格保持 + 幻觉长行拒绝。"""
+
+    def _calibrate_with_stub(self, fixed_map):
+        import srtfix
+        import ai_subfix
+
+        def stub(subtitles, script, cfg=None):
+            fixed = {s["segment_id"]: fixed_map.get(int(s["segment_id"]), s["text"])
+                     for s in subtitles}
+            changes = [{"segment_id": k, "index": int(k), "start_sec": 0,
+                        "old": next(x["text"] for x in subtitles if x["segment_id"] == k),
+                        "new": v}
+                       for k, v in fixed.items()
+                       if v != next(x["text"] for x in subtitles if x["segment_id"] == k)]
+            return fixed, changes, ["stub"]
+
+        orig = ai_subfix.ai_align
+        ai_subfix.ai_align = stub
+        try:
+            return srtfix.calibrate_srt(SRT_OK, SCRIPT_OK, ai=True)
+        finally:
+            ai_subfix.ai_align = orig
+
+    def test_punct_free_style_preserved(self):
+        """原文无标点 → AI 修正行也不得带标点。"""
+        fixed = {1: "他的事迹，很感人！", 2: "答案取决于镍价。"}
+        out, changes, applied, _ = self._calibrate_with_stub(fixed)
+        self.assertNotIn("，", out.split("\n")[2])
+        self.assertNotIn("！", out.split("\n")[2])
+        self.assertNotIn("。", out.split("\n")[5])
+
+    def test_hallucinated_long_line_rejected(self):
+        """修正行比原文长 6 字以上（重复/扩写幻觉）→ 弃用，保留原文。"""
+        fixed = {1: "他的事迹很感人，而且逻辑被重写的价格往往后知后觉",
+                 2: "答案取决于镍价"}
+        out, changes, applied, _ = self._calibrate_with_stub(fixed)
+        self.assertIn("他的事迹很感人", out)  # 原文保留（未采纳幻觉行）
+        self.assertFalse(any("逻辑被重写" in ln for ln in out.split("\n")))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

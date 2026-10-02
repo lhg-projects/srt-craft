@@ -79,6 +79,24 @@ def calibrate_srt(srt_text, script, phonetic=True, ai=False):
         fixed, changes, notes = ai_subfix.ai_align(subs, clean)
     else:
         fixed, changes = subfix.align_phonetic(subs, clean)
+    # 行级护栏（针对 AI 重建文本的两个已知缺陷）：
+    # ① 原文无标点（转写风格）→ 修正行强制去标点（0.2% 这类小数点保留）
+    # ② 修正行比原文长 6 字以上 → 视为重复/扩写幻觉，弃用保留原文
+    import re
+    import asr_local
+    _punct = re.compile(r'[。！？；，、：""''…—（）【】《》<>!?,;:]')
+    for e in entries:
+        new = fixed.get(str(e["index"]))
+        if not new or new == e["text"]:
+            continue
+        if not _punct.search(e["text"]):
+            new = asr_local.strip_punct(new)
+        if len(new) > len(e["text"]) + 6:
+            notes.append(f"第 {e['index']} 条修正行异常变长"
+                         f"（{len(e['text'])}→{len(new)} 字），已保留原文")
+            fixed.pop(str(e["index"]), None)
+            continue
+        fixed[str(e["index"])] = new
     applied = 0
     for e in entries:
         new = fixed.get(str(e["index"]))
