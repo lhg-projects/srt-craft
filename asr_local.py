@@ -28,7 +28,27 @@ def _ts(sec):
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
-def split_segment(text, start, end, max_chars=25):
+_DEFAULT_MAX_CHARS = 16  # 每条字幕上限；config.json: asr_max_chars 可调
+DEFAULT_MAX_CHARS = _DEFAULT_MAX_CHARS
+_STRIP_RE = None
+_DOT_RE = None
+
+
+def strip_punct(text):
+    """去标点：字幕更美观（时间轴靠字符比例内插，与断句解耦）。
+    两步走：先去标点类（不含点号），再去非法位置的点——
+    数字间的小数点（0.2%）保留，句尾/词界的点去掉。"""
+    global _STRIP_RE, _DOT_RE
+    if _STRIP_RE is None:
+        import re
+        _STRIP_RE = re.compile(
+            r"[。！？；，、：""''""…—·\-\[\]\(\)（）【】《》<>\"'!?,;:~～`]+")
+        _DOT_RE = re.compile(r"(?<!\d)\.(?!\d)|\.(?=\s|$)")
+    return _DOT_RE.sub("", _STRIP_RE.sub("", text)).strip()
+    return _STRIP_RE.sub("", text).strip()
+
+
+def split_segment(text, start, end, max_chars=DEFAULT_MAX_CHARS):
     """把 whisper 的一个 VAD 长段按标点切成 ≤max_chars 字的小条。
     返回 [(文本, 起秒, 止秒), ...]；时间按字符数线性内插。
     断句优先级：。！？ > ； > ，——优先在句边界切，其次子句边界；
@@ -78,6 +98,23 @@ def info_duration(wav_path):
     return float(_json.loads(out or "{}").get("format", {}).get("duration", 0))
 
 
+def build_srt_from_segments(segments, max_chars=DEFAULT_MAX_CHARS):
+    """whisper segments（(文本, 起, 止) 迭代器）→ 断句 + 去标点 → SRT 文本。
+    返回 (srt 文本, 条数)。"""
+    parts = []
+    i = 0
+    for text, seg_start, seg_end in segments:
+        # 长段按标点断句（whisper VAD 一口气给 25s+ 的段，导入剪映糊满全屏），
+        # 切完去掉标点（字幕更美观，断句语义边界不受影响）
+        for t, s, e in split_segment(text.strip(), seg_start, seg_end, max_chars):
+            t = strip_punct(t)
+            if not t:
+                continue
+            i += 1
+            parts.append(f"{i}\n{_ts(s)} --> {_ts(e)}\n{t}")
+    return "\n\n".join(parts) + ("\n" if parts else ""), i
+
+
 def transcribe_to_srt(wav_path, cfg=None, initial_prompt=None):
     """音频 → 粗稿 SRT。返回 (srt 文本, 语言, 总时长)。
     initial_prompt 缺省给金融口播热词（本工具的目标场景），显著减少
@@ -90,14 +127,7 @@ def transcribe_to_srt(wav_path, cfg=None, initial_prompt=None):
         wav_path, beam_size=5,
         initial_prompt=initial_prompt or _default_prompt,
         vad_filter=True)
-    parts = []
-    i = 0
-    for seg in segments:
-        # 长段按标点断句（whisper VAD 一口气给 25s+ 的段，导入剪映糊满全屏）
-        for text, s, e in split_segment(seg.text.strip(), seg.start, seg.end):
-            if not text:
-                continue
-            i += 1
-            parts.append(f"{i}\n{_ts(s)} --> {_ts(e)}\n{text}")
-    srt_text = "\n\n".join(parts) + ("\n" if parts else "")
+    max_chars = int(cfg.get("asr_max_chars", DEFAULT_MAX_CHARS) or DEFAULT_MAX_CHARS)
+    srt_text, _count = build_srt_from_segments(
+        ((seg.text, seg.start, seg.end) for seg in segments), max_chars=max_chars)
     return srt_text, info.language, info.duration

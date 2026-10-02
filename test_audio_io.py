@@ -119,6 +119,37 @@ class TestSplitSegment(unittest.TestCase):
         for t, s, e in parts:
             self.assertLessEqual(len(t), 20)
 
+    def test_default_max_chars_16(self):
+        from asr_local import split_segment
+        text = ("晚上八点半，一份数据让整个紧缩预期松了扣。美国8月核心PCE环比0.2%，"
+                "预期是0.3%；同比3.0%，预期3.3%，前值同样是3.3%。")
+        parts = split_segment(text, start=0.0, end=25.0)  # 不传 max_chars → 默认 16
+        self.assertGreater(len(parts), 2)  # 比 25 字时代更细
+        for t, s, e in parts:
+            self.assertLessEqual(len(t), 16, f"超长: {t}")
+
+    def test_strip_punct(self):
+        from asr_local import strip_punct
+        self.assertEqual(strip_punct("晚上八点半，松了扣。"), "晚上八点半松了扣")
+        self.assertEqual(strip_punct("美国8月PCE环比0.2%！"), "美国8月PCE环比0.2%")
+        self.assertEqual(strip_punct('他说："你好"'), "他说你好")
+        self.assertEqual(strip_punct("English, hello!"), "English hello")
+        self.assertEqual(strip_punct("断崖式暴冷。"), "断崖式暴冷")
+
+    def test_build_srt_stripped(self):
+        """转写管线产出：文本无标点、每条 ≤max_chars。"""
+        from asr_local import build_srt_from_segments
+        segs = [("晚上八点半，一份数据让整个紧缩预期松了扣。", 0.0, 12.0),
+                ("美国8月核心PCE环比0.2%，预期是0.3%；同比3.0%。", 12.0, 25.0)]
+        srt, count = build_srt_from_segments(iter(segs), max_chars=16)
+        self.assertGreater(count, 2)
+        for block in srt.split("\n\n"):
+            if not block.strip():
+                continue
+            text_line = block.split("\n")[2]
+            self.assertNotRegex(text_line, r"[。！？；，,、：…]")
+            self.assertLessEqual(len(text_line), 16)
+
 
 class TestSpeedChange(unittest.TestCase):
     """音频变速（默认 1.1x）：atempo 变速不变调，裁剪后、转写前执行。"""
