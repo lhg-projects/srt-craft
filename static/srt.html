@@ -262,8 +262,7 @@ async function uploadAudio(e) {
     $('#audioInfo').textContent = `✅ 原始 ${r.duration_sec}s → 裁剪后 ${r.kept_sec}s${sped}`;
     $('#asrBtn').disabled = false;
     refreshAudioBtn();
-    // 自动开始转写（处理链完成后即进入），无需再手动点「生成 SRT」
-    await runAsr();
+    // 不自动转写：等用户点「生成 SRT」或「开始校正」才开始
   } catch (err) {
     $('#audioInfo').textContent = '❌ 上传失败: ' + err;
   }
