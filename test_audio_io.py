@@ -124,9 +124,22 @@ class TestSplitSegment(unittest.TestCase):
         text = ("晚上八点半，一份数据让整个紧缩预期松了扣。美国8月核心PCE环比0.2%，"
                 "预期是0.3%；同比3.0%，预期3.3%，前值同样是3.3%。")
         parts = split_segment(text, start=0.0, end=25.0)  # 不传 max_chars → 默认 16
-        self.assertGreater(len(parts), 2)  # 比 25 字时代更细
         for t, s, e in parts:
             self.assertLessEqual(len(t), 16, f"超长: {t}")
+
+    def test_split_at_every_punct(self):
+        """遇到标点就切：每个分句一条，不做优先级合并。"""
+        from asr_local import split_segment
+        parts = split_segment("晚上八点半，松了扣。美国跌了！", start=0.0, end=9.0)
+        self.assertEqual([t for t, s, e in parts],
+                         ["晚上八点半", "松了扣", "美国跌了"])
+        self.assertAlmostEqual(parts[-1][2], 9.0, places=2)
+
+    def test_short_untouched(self):
+        from asr_local import split_segment
+        parts = split_segment("大家好，晚上八点半。", start=0.0, end=4.0, max_chars=25)
+        # 遇标点就切：两个分句两条（哪怕总长只有 9 字）
+        self.assertEqual([t for t, s, e in parts], ["大家好", "晚上八点半"])
 
     def test_strip_punct(self):
         from asr_local import strip_punct

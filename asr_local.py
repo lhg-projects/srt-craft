@@ -49,36 +49,23 @@ def strip_punct(text):
 
 
 def split_segment(text, start, end, max_chars=DEFAULT_MAX_CHARS):
-    """把 whisper 的一个 VAD 长段按标点切成 ≤max_chars 字的小条。
-    返回 [(文本, 起秒, 止秒), ...]；时间按字符数线性内插。
-    断句优先级：。！？ > ； > ，——优先在句边界切，其次子句边界；
-    无标点的超长段按字数硬切。"""
+    """把 whisper 的一个 VAD 长段切成一条条分句。
+    规则：遇到标点就切（。！？；，、：等，每个分句一条），
+    没有优先级合并；无标点且超过 max_chars 的子句按字数硬切兜底。
+    返回 [(文本, 起秒, 止秒), ...]；时间按字符数线性内插。"""
     import re
-    text = text.strip()
-    if len(text) <= max_chars:
-        return [(text, start, end)]
-    # 标点位置 → 优先级（越小越优先切）
-    prio = {ch: i for i, ch in enumerate(["。", "！", "？", "；", "，", ","])}
-    cuts = []  # (位置, 优先级)，切点在标点后
-    for m in re.finditer(r"[。！？；，,]", text):
-        cuts.append((m.end(), prio[m.group()]))
     pieces = []
-    pos = 0
-    while pos < len(text):
-        chunk = text[pos:pos + max_chars]
-        if pos + max_chars >= len(text):
-            pieces.append(chunk)
-            break
-        # 在本窗口内找优先级最高（数字最小）的切点
-        window = [c for c in cuts if pos + 8 <= c[0] <= pos + max_chars]
-        if window:
-            best = min(window, key=lambda c: (c[1], -c[0]))
-            cut = best[0]
-        else:
-            cut = pos + max_chars  # 硬切
-        pieces.append(text[pos:cut].strip())
-        pos = cut
-    pieces = [p for p in pieces if p]
+    for p in re.split(r"[。！？；，、：,;:…]+", text.strip()):
+        p = p.strip()
+        if not p:
+            continue
+        while len(p) > max_chars:  # 无标点超长兜底
+            pieces.append(p[:max_chars])
+            p = p[max_chars:]
+        if p:
+            pieces.append(p)
+    if not pieces:
+        return []
     # 字符数比例 → 时间内插
     total = sum(len(p) for p in pieces)
     out, t = [], start
