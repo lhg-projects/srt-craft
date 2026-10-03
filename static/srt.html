@@ -293,9 +293,9 @@
     <h2 style="margin-top:16px"><span class="stepchip">4</span><span class="steptitle">修正版 SRT</span><span class="stepsub">导入剪映用</span></h2>
     <textarea id="out" class="mono" placeholder="校正后的 SRT 会显示在这里"></textarea>
     <div class="row">
-      <button id="dlBtn" disabled title="首次保存弹对话框选位置；本次会话内再点直接保存到上次位置；Shift+点击 = 另存为"><svg class="ic" aria-hidden="true"><use href="#i-download"/></svg> 下载修正版 .srt</button>
-      <button id="dlAudioBtn" disabled style="display:none" title="首次保存弹对话框选位置；会话内再点直接保存；Shift+点击 = 另存为"><svg class="ic" aria-hidden="true"><use href="#i-headphones"/></svg> 下载裁剪后音频</button>
-      <button id="dlAllBtn" disabled style="display:none" title="首次保存弹对话框选位置；会话内再点直接保存；Shift+点击 = 另存为"><svg class="ic" aria-hidden="true"><use href="#i-box"/></svg> 一键下载（SRT + 音频）</button>
+      <button id="dlBtn" disabled title="每次保存都会弹对话框选位置，自动定位到上次保存的目录"><svg class="ic" aria-hidden="true"><use href="#i-download"/></svg> 下载修正版 .srt</button>
+      <button id="dlAudioBtn" disabled style="display:none" title="每次保存都会弹对话框选位置，自动定位到上次保存的目录"><svg class="ic" aria-hidden="true"><use href="#i-headphones"/></svg> 下载裁剪后音频</button>
+      <button id="dlAllBtn" disabled style="display:none" title="每次保存都会弹对话框选位置，自动定位到上次保存的目录"><svg class="ic" aria-hidden="true"><use href="#i-box"/></svg> 一键下载（SRT + 音频）</button>
       <span class="hint" style="margin:0">剪映里：文本 → 字幕 → 导入字幕（或拖入 SRT）→ 删除旧字幕轨</span>
     </div>
   </div>
@@ -303,7 +303,7 @@
 <footer class="colophon">
   <span>出品 <a href="https://github.com/lhg-projects" target="_blank" rel="noopener">lhg-projects</a> · 刘洪光（安徽合肥）</span>
   <span class="dot">·</span>
-  <span>视频号搜「<a href="https://github.com/lhg-projects" target="_blank" rel="noopener" title="视频号：刘洪光实名上网">刘洪光实名上网</a>」</span>
+  <span>视频号搜「<a href="https://github.com/lhg-skills" target="_blank" rel="noopener" title="视频号：刘洪光实名上网">刘洪光实名上网</a>」</span>
   <span class="dot">·</span>
   <a href="https://github.com/lhg-projects/srt-craft" target="_blank" rel="noopener">GitHub 开源仓库</a>
   <span class="dot">·</span>
@@ -673,13 +673,12 @@ async function calibrate() {
   }
 }
 
-// ---------- 下载位置记忆（File System Access API，会话级） ----------
-// 首次保存弹系统对话框选路径；同一会话内之后保存静默写入上次文件，
-// 无任何权限弹框（句柄只存内存、不持久化——持久化才会触发浏览器授权框）。
-// 刷新页面后首次保存会再弹一次对话框（浏览器自动定位到上次目录）；
-// 按住 Shift 点击 = 另存为（换路径）。不支持的浏览器回退普通下载。
+// ---------- 保存对话框（File System Access API） ----------
+// 每次保存都弹系统对话框，让你选文件名和位置；对话框自动定位到
+// 上次保存的目录（startIn 记住上次的句柄）。换目录随时可改，
+// 刷新页面后第一次保存自动回到浏览器默认目录。不支持的浏览器回退普通下载。
 
-const _saveHandles = {};  // kind → FileSystemFileHandle（仅内存）
+const _saveHandles = {};  // kind → FileSystemFileHandle（仅用于 startIn 定位上次目录）
 
 function legacyDownload(blob, name) {
   const a = document.createElement('a');
@@ -689,35 +688,29 @@ function legacyDownload(blob, name) {
   URL.revokeObjectURL(a.href);
 }
 
-async function saveBlobRemembered(blob, suggestedName, key, opts = {}) {
-  // 返回实际写入的文件名；forceDialog（或 Shift 点击）= 另存为并更新记忆
+async function saveBlobRemembered(blob, suggestedName, key) {
+  // 每次都弹对话框；startIn = 上次保存位置（目录级），浏览器自动定位
   if (!('showSaveFilePicker' in window)) { legacyDownload(blob, suggestedName); return suggestedName; }
-  let handle = !opts.forceDialog ? _saveHandles[key] : null;
-  if (handle) {
-    if (await handle.queryPermission({ mode: 'readwrite' }) === 'granted') {
-      const w = await handle.createWritable(); await w.write(blob); await w.close();
-      return handle.name;
-    }
-    delete _saveHandles[key];  // 权限失效则重新走对话框
-    handle = null;
-  }
-  handle = await showSaveFilePicker({ suggestedName });
+  const handle = await showSaveFilePicker({
+    suggestedName,
+    ...( _saveHandles[key] ? { startIn: _saveHandles[key] } : {}),
+  });
   _saveHandles[key] = handle;
   const w = await handle.createWritable(); await w.write(blob); await w.close();
   return handle.name;
 }
 
-function download({ forceDialog = false } = {}) {
+function download({ } = {}) {
   if (!$('#out').value.trim()) return;
   const name = $('#draftSel').value || 'subtitles';
   const blob = new Blob([$('#out').value], {type: 'application/x-subrip;charset=utf-8'});
-  saveBlobRemembered(blob, name.replace(/[\\/:*?"<>|\s]+/g, '_') + '_修正.srt', 'srt', { forceDialog })
+  saveBlobRemembered(blob, name.replace(/[\\/:*?"<>|\s]+/g, '_') + '_修正.srt', 'srt')
     .then(fn => { $('#status').textContent = '✅ 已保存：' + fn; $('#status').className = 'ok'; })
-    .catch(e => { if (e && e.name === 'AbortError') return;  // 用户取消另存为
+    .catch(e => { if (e && e.name === 'AbortError') return;  // 用户取消对话框
       $('#status').textContent = '保存失败: ' + e; $('#status').className = 'err'; });
 }
 
-async function downloadCutAudio(forceDialog = false) {
+async function downloadCutAudio() {
   if (!audioPath) return;
   try {
     // prepare 已处理完（裁剪+变速），直接下载该成品；文件名沿用上传原名
@@ -727,7 +720,7 @@ async function downloadCutAudio(forceDialog = false) {
     })).json();
     if (!r.ok) { $('#status').textContent = r.error; $('#status').className = 'err'; return; }
     const blob = await (await fetch(r.download_url)).blob();
-    const fn = await saveBlobRemembered(blob, r.filename, 'audio', { forceDialog });
+    const fn = await saveBlobRemembered(blob, r.filename, 'audio');
     $('#status').textContent = '✅ 已保存：' + fn;
     $('#status').className = 'ok';
   } catch (e) {
@@ -737,7 +730,7 @@ async function downloadCutAudio(forceDialog = false) {
   }
 }
 
-async function downloadAll(forceDialog = false) {
+async function downloadAll() {
   if (!audioPath || !$('#out').value.trim()) return;
   $('#status').textContent = '打包中…';
   $('#status').className = '';
@@ -757,7 +750,7 @@ async function downloadAll(forceDialog = false) {
     }
     const blob = await r.blob();
     const zipName = (audioOriginalName || 'subtitles').replace(/[\\/:*?"<>|\s]+/g, '_') + '_字幕音频打包.zip';
-    const fn = await saveBlobRemembered(blob, zipName, 'zip', { forceDialog });
+    const fn = await saveBlobRemembered(blob, zipName, 'zip');
     $('#status').textContent = '✅ 已保存：' + fn + '（修正版 .srt + 处理后音频）';
     $('#status').className = 'ok';
   } catch (e) {

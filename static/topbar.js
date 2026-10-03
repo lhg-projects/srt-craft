@@ -4,11 +4,10 @@
 (function () {
   var BRAND = (document.currentScript && document.currentScript.dataset.brand) || "剪映工具箱";
 
-  // 主题：localStorage 优先，默认跟随系统；渲染前设置避免闪白
-  var theme = "dark";
+  // 主题：localStorage 优先，默认亮色（用户偏好基准）；渲染前设置避免闪白
+  var theme = "light";
   try {
-    theme = localStorage.getItem("jy_theme")
-      || (window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+    theme = localStorage.getItem("jy_theme") || "light";
   } catch (e) {}
   document.documentElement.dataset.theme = theme;
   var link = document.createElement("link");
