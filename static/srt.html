@@ -12,6 +12,8 @@
   /* 报告条数多时内部滚动，避免把 ④ 下载区顶出首屏 */
   #report { max-height: 45vh; overflow-y: auto; overscroll-behavior: contain; }
   #out { height: 200px; }
+  /* 设置弹窗表单：宽屏双列，≤768px 单列（内联样式会盖掉媒体查询，故定义在样式表） */
+  .cfgGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
   /* 阶段进度条：一条龙运行时 ①转写 ②校正 各一条 */
   .prog { margin: 8px 0 4px; }
   .prog .track { height: 6px; border-radius: 3px; background: var(--border, #e2e8f0); overflow: hidden; }
@@ -20,6 +22,14 @@
     animation: progslide 1.2s ease-in-out infinite; }
   .prog .label { font-size: 12px; color: var(--text-dim, #64748b); margin-bottom: 4px; }
   @keyframes progslide { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
+  /* 窄屏单列：双栏栅格在 ≤768px 会因子元素 min-content 撑出横向滚动条 */
+  @media (max-width: 768px) {
+    main { grid-template-columns: 1fr; gap: 12px; }
+    .panel { min-width: 0; }
+    textarea { height: 160px; }
+    #out { height: 140px; }
+    #cfgDialog .cfgGrid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
@@ -29,7 +39,7 @@
 <dialog id="cfgDialog" style="width:720px;max-width:94vw">
   <h3>⚙️ AI 校正设置（推荐）</h3>
   <div class="hint" style="margin:0 0 12px">不配置也能用：拼音对齐完全本地运行。AI 模式支持多家供应商（密钥只保存在本机 config.json）。</div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+  <div class="cfgGrid">
     <div>
       <div class="hint" style="margin:0 0 4px">大模型供应商</div>
       <select id="cfgProvider"></select>
@@ -70,7 +80,7 @@
     <div class="row" style="margin:0 0 10px">
       <select id="draftSel"><option value="">选择草稿…</option></select>
       <button class="ghost" id="genBtn">从草稿生成 SRT</button>
-      <span style="font-size:12px;color:#888">或粘贴 / 上传剪映导出的 .srt</span>
+      <span style="font-size:12px;color:var(--text-faint)">或粘贴 / 上传剪映导出的 .srt</span>
       <input type="file" id="srtFile" accept=".srt,.txt">
     </div>
     </div>
