@@ -113,10 +113,9 @@
     <h2 style="margin-top:16px">④ 修正版 SRT（导入剪映用）</h2>
     <textarea id="out" class="mono" placeholder="校正后的 SRT 会显示在这里"></textarea>
     <div class="row">
-      <button id="dlBtn" disabled title="点击保存到上次的位置；按住 Shift 点击 = 另存为（换路径）">⬇️ 下载修正版 .srt</button>
-      <button id="dlAudioBtn" disabled style="display:none" title="点击保存到上次的位置；按住 Shift 点击 = 另存为">🎧 下载裁剪后音频</button>
-      <button id="dlAllBtn" disabled style="display:none" title="点击保存到上次的位置；按住 Shift 点击 = 另存为">📦 一键下载（SRT + 音频）</button>
-      <button class="ghost" id="dlSaveAsBtn" style="display:none;padding:4px 10px;font-size:12px" title="下次下载弹窗选新位置，并记住为新默认">↪ 换保存位置</button>
+      <button id="dlBtn" disabled title="首次保存弹对话框选位置；本次会话内再点直接保存到上次位置；Shift+点击 = 另存为">⬇️ 下载修正版 .srt</button>
+      <button id="dlAudioBtn" disabled style="display:none" title="首次保存弹对话框选位置；会话内再点直接保存；Shift+点击 = 另存为">🎧 下载裁剪后音频</button>
+      <button id="dlAllBtn" disabled style="display:none" title="首次保存弹对话框选位置；会话内再点直接保存；Shift+点击 = 另存为">📦 一键下载（SRT + 音频）</button>
       <span class="hint" style="margin:0">剪映里：文本 → 字幕 → 导入字幕（或拖入 SRT）→ 删除旧字幕轨</span>
     </div>
   </div>
@@ -136,7 +135,6 @@ async function init() {
   $('#dlBtn').onclick = e => download({ forceDialog: e.shiftKey });
   $('#dlAudioBtn').onclick = e => downloadCutAudio(e.shiftKey);
   $('#dlAllBtn').onclick = e => downloadAll(e.shiftKey);
-  $('#dlSaveAsBtn').onclick = () => download({ forceDialog: true });
   $('#cfgBtn').onclick = openCfg;
   $('#cfgProvider').onchange = () => { applyPreset(); showTips($('#cfgProvider').value); };
   $('#cfgEye').onclick = toggleKeyEye;
@@ -465,7 +463,6 @@ async function calibrate() {
     $('#status').className = r.applied ? 'ok' : '';
     $('#out').value = r.srt;
     $('#dlBtn').disabled = false;
-    document.getElementById('dlSaveAsBtn').style.display = '';
     refreshAudioBtn();  // out 就绪 → 「一键下载」按钮亮起
     $('#report').innerHTML = !r.changes.length
       ? '<div class="nochange">✅ 未发现需要修改的地方，SRT 与文稿一致。</div>'
@@ -483,33 +480,14 @@ async function calibrate() {
   }
 }
 
-// ---------- 下载位置记忆（File System Access API） ----------
-// 首次保存弹系统对话框选路径；之后默认写上次的文件（不弹框）；
-// 按住 Shift 点击 = 另存为（换路径，记忆随之更新）。不支持的浏览器回退普通下载。
+// ---------- 下载位置记忆（File System Access API，会话级） ----------
+// 首次保存弹系统对话框选路径；同一会话内之后保存静默写入上次文件，
+// 无任何权限弹框（句柄只存内存、不持久化——持久化才会触发浏览器授权框）。
+// 刷新页面后首次保存会再弹一次对话框（浏览器自动定位到上次目录）；
+// 按住 Shift 点击 = 另存为（换路径）。不支持的浏览器回退普通下载。
 
-function _idbOpen() {
-  return new Promise((res, rej) => {
-    const r = indexedDB.open('srtcraft_save', 1);
-    r.onupgradeneeded = () => r.result.createObjectStore('handles');
-    r.onsuccess = () => res(r.result);
-    r.onerror = () => rej(r.error);
-  });
-}
-async function _idbGet(key) {
-  const db = await _idbOpen();
-  return new Promise((res, rej) => {
-    const t = db.transaction('handles').objectStore('handles').get(key);
-    t.onsuccess = () => res(t.result); t.onerror = () => rej(t.error);
-  });
-}
-async function _idbSet(key, val) {
-  const db = await _idbOpen();
-  return new Promise((res, rej) => {
-    const t = db.transaction('handles', 'readwrite');
-    t.objectStore('handles').put(val, key);
-    t.oncomplete = () => res(); t.onerror = () => rej(t.error);
-  });
-}
+const _saveHandles = {};  // kind → FileSystemFileHandle（仅内存）
+
 function legacyDownload(blob, name) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -520,20 +498,18 @@ function legacyDownload(blob, name) {
 
 async function saveBlobRemembered(blob, suggestedName, key, opts = {}) {
   // 返回实际写入的文件名；forceDialog（或 Shift 点击）= 另存为并更新记忆
-  const forceDialog = opts.forceDialog;
   if (!('showSaveFilePicker' in window)) { legacyDownload(blob, suggestedName); return suggestedName; }
-  let handle = null;
-  if (!forceDialog) handle = await _idbGet(key);
+  let handle = !opts.forceDialog ? _saveHandles[key] : null;
   if (handle) {
-    let perm = await handle.queryPermission({ mode: 'readwrite' });
-    if (perm !== 'granted') perm = await handle.requestPermission({ mode: 'readwrite' });
-    if (perm === 'granted') {
+    if (await handle.queryPermission({ mode: 'readwrite' }) === 'granted') {
       const w = await handle.createWritable(); await w.write(blob); await w.close();
       return handle.name;
     }
+    delete _saveHandles[key];  // 权限失效则重新走对话框
+    handle = null;
   }
   handle = await showSaveFilePicker({ suggestedName });
-  await _idbSet(key, handle);
+  _saveHandles[key] = handle;
   const w = await handle.createWritable(); await w.write(blob); await w.close();
   return handle.name;
 }
