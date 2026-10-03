@@ -7,7 +7,10 @@
 <script src="/static/topbar.js" data-brand="SRT 字幕校正"></script>
 <style>
   main { max-width: 1140px; margin: 20px auto; padding: 0 16px; display: grid;
-         grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+         grid-template-columns: 1fr 1fr; gap: 16px; align-items: stretch; }
+  /* 两栏等高：面板做弹性列，④ 输出框撑满剩余高度，消除右栏下方大片死区 */
+  .panel { display: flex; flex-direction: column; }
+  #out { flex: 1 1 auto; min-height: 160px; }
   textarea { height: 240px; }
   /* 报告条数多时内部滚动，避免把 ④ 下载区顶出首屏 */
   #report { max-height: 45vh; overflow-y: auto; overscroll-behavior: contain; }
@@ -27,17 +30,17 @@
     main { grid-template-columns: 1fr; gap: 12px; }
     .panel { min-width: 0; }
     textarea { height: 160px; }
-    #out { height: 140px; }
+    #out { flex: none; height: 140px; }
     #cfgDialog .cfgGrid { grid-template-columns: 1fr; }
   }
 </style>
 </head>
 <body>
 <header>
-  <button class="ghost" id="cfgBtn" style="padding:5px 12px;font-size:13px">⚙️ AI 设置（推荐）</button>
+  <button class="ghost" id="cfgBtn" style="padding:5px 12px;font-size:13px"><svg class="ic" aria-hidden="true"><use href="#i-gear"/></svg> AI 设置<span class="cfgExtra">（推荐）</span></button>
 </header>
 <dialog id="cfgDialog" style="width:720px;max-width:94vw">
-  <h3>⚙️ AI 校正设置（推荐）</h3>
+  <h3><svg class="ic" aria-hidden="true"><use href="#i-gear"/></svg> AI 校正设置（推荐）</h3>
   <div class="hint" style="margin:0 0 12px">不配置也能用：拼音对齐完全本地运行。AI 模式支持多家供应商（密钥只保存在本机 config.json）。</div>
   <div class="cfgGrid">
     <div>
@@ -46,14 +49,14 @@
       <div class="hint" style="margin:10px 0 4px">API Key</div>
       <div style="position:relative">
         <input type="password" id="cfgKey" placeholder="API 密钥（留空表示不修改）" style="padding-right:38px">
-        <button type="button" id="cfgEye" title="显示/隐藏密钥" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:transparent;border:none;padding:4px 6px;font-size:14px;color:var(--text-faint)">👁</button>
+        <button type="button" id="cfgEye" title="显示/隐藏密钥" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:transparent;border:none;padding:4px 6px;font-size:14px;color:var(--text-faint)"><svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg></button>
       </div>
       <div class="hint" style="margin:10px 0 4px">Base Url</div>
       <input type="text" id="cfgUrl" placeholder="API 地址，如 https://api.openai.com/v1">
       <div class="hint" style="margin:10px 0 4px">模型名称</div>
       <input type="text" id="cfgModel" placeholder="模型名，如 gpt-4o-mini">
       <div class="row" style="margin-top:14px">
-        <button class="ghost" id="cfgTest">⚡ 测试模型连接</button>
+        <button class="ghost" id="cfgTest"><svg class="ic" aria-hidden="true"><use href="#i-zap"/></svg> 测试模型连接</button>
         <span id="cfgTestResult" class="hint" style="margin:0"></span>
       </div>
     </div>
@@ -73,7 +76,7 @@
         <option value="audio">来源：导入音频生成</option>
       </select>
       <button class="ghost" id="srcReset" style="padding:4px 10px;font-size:12px" title="清除记住的默认来源，回到「从草稿生成」">恢复默认</button>
-      <button class="ghost" id="pageReload" style="padding:4px 8px;font-size:13px" title="刷新整个页面（清空当前填写内容，重新开始）">↻</button>
+      <button class="ghost" id="pageReload" style="padding:4px 8px;font-size:13px" title="刷新整个页面（清空当前填写内容，重新开始）"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg></button>
       </span>
     </h2>
     <div id="srcDraft">
@@ -93,7 +96,7 @@
         <label style="font-size:13px">剪掉开头 <input type="number" id="headSec" min="0" step="0.5" value="0" style="width:64px"> 秒</label>
         <label style="font-size:13px">剪掉结尾 <input type="number" id="tailSec" min="0" step="0.5" value="0" style="width:64px"> 秒</label>
         <label style="font-size:13px" title="给音频整体加速（成片节奏更紧凑），变速不变调；处理后音频与 SRT 时间轴对齐">倍速 <input type="number" id="speedX" min="0.5" max="2" step="0.1" value="1.1" style="width:56px"> ×</label>
-        <button class="ghost" id="asrBtn" disabled>🎙️ 生成 SRT（whisper）</button>
+        <button class="ghost" id="asrBtn" disabled><svg class="ic" aria-hidden="true"><use href="#i-mic"/></svg> 生成 SRT（whisper）</button>
       </div>
       <div class="hint" style="margin:0 0 8px">上传音频 → 剪掉开头/结尾 → 变速（默认 1.1×，不变调）→ 本地 whisper 转写（遇标点逐句切分、去标点）填入下方。改参数后重新选择文件即可重跑。首次使用会下载 whisper 模型。</div>
     </div>
@@ -111,8 +114,8 @@
       <div class="track"><div class="fill"></div></div>
     </div>
     <div class="row">
-      <label style="font-size:13px" title="默认模式（不用AI）：同音错字/漏字/标点，秒级完成"><input type="checkbox" id="phonetic" checked> 📢 拼音对齐（默认）</label>
-      <label style="font-size:13px" title="调用大模型语义修复，最准确；长字幕需 1-4 分钟。无原稿时必须使用且自动勾选"><input type="checkbox" id="aiMode"> 🤖 AI 校正<span id="aiMust" style="color:var(--warn);display:none">（无原稿必选）</span></label>
+      <label style="font-size:13px" title="默认模式（不用AI）：同音错字/漏字/标点，秒级完成"><input type="checkbox" id="phonetic" checked> <svg class="ic" aria-hidden="true"><use href="#i-volume"/></svg> 拼音对齐（默认）</label>
+      <label style="font-size:13px" title="调用大模型语义修复，最准确；长字幕需 1-4 分钟。无原稿时必须使用且自动勾选"><input type="checkbox" id="aiMode"> <svg class="ic" aria-hidden="true"><use href="#i-cpu"/></svg> AI 校正<span id="aiMust" style="color:var(--warn);display:none">（无原稿必选）</span></label>
       <button id="goBtn" style="margin-left:auto">开始校正</button>
     </div>
     <div id="status"></div>
@@ -123,9 +126,9 @@
     <h2 style="margin-top:16px">④ 修正版 SRT（导入剪映用）</h2>
     <textarea id="out" class="mono" placeholder="校正后的 SRT 会显示在这里"></textarea>
     <div class="row">
-      <button id="dlBtn" disabled title="首次保存弹对话框选位置；本次会话内再点直接保存到上次位置；Shift+点击 = 另存为">⬇️ 下载修正版 .srt</button>
-      <button id="dlAudioBtn" disabled style="display:none" title="首次保存弹对话框选位置；会话内再点直接保存；Shift+点击 = 另存为">🎧 下载裁剪后音频</button>
-      <button id="dlAllBtn" disabled style="display:none" title="首次保存弹对话框选位置；会话内再点直接保存；Shift+点击 = 另存为">📦 一键下载（SRT + 音频）</button>
+      <button id="dlBtn" disabled title="首次保存弹对话框选位置；本次会话内再点直接保存到上次位置；Shift+点击 = 另存为"><svg class="ic" aria-hidden="true"><use href="#i-download"/></svg> 下载修正版 .srt</button>
+      <button id="dlAudioBtn" disabled style="display:none" title="首次保存弹对话框选位置；会话内再点直接保存；Shift+点击 = 另存为"><svg class="ic" aria-hidden="true"><use href="#i-headphones"/></svg> 下载裁剪后音频</button>
+      <button id="dlAllBtn" disabled style="display:none" title="首次保存弹对话框选位置；会话内再点直接保存；Shift+点击 = 另存为"><svg class="ic" aria-hidden="true"><use href="#i-box"/></svg> 一键下载（SRT + 音频）</button>
       <span class="hint" style="margin:0">剪映里：文本 → 字幕 → 导入字幕（或拖入 SRT）→ 删除旧字幕轨</span>
     </div>
   </div>

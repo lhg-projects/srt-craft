@@ -185,6 +185,20 @@ button.ghost {
 button.ghost:hover { border-color: var(--accent-border); color: var(--accent); box-shadow: none; }
 dialog button { min-width: 80px; }
 
+/* ---------- SVG 线性图标（sprite 由 topbar.js 注入，<use href="#i-*"> 引用） ---------- */
+.ic {
+  width: 1em; height: 1em; min-width: 14px; min-height: 14px;
+  vertical-align: -0.125em; /* 与中文 x-height 对齐 */
+  fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0;
+}
+/* 图标与文字的间距：flex 容器靠 gap，行内内容靠 .ic 的右边距 */
+button .ic, .brand .logo .ic { margin-right: 6px; }
+button > .ic:last-child, .brand .logo .ic { margin-right: 0; }
+.brand .logo { display: grid; place-items: center; }
+.brand .logo .ic { width: 15px; height: 15px; }
+.themetoggle .ic { width: 16px; height: 16px; margin: 0; }
+
 /* ---------- 状态与报告 ---------- */
 #status, .status { font-size: 13px; margin: 10px 0; color: var(--text-dim); }
 #status.ok, .status.ok { color: var(--ok); }
@@ -283,4 +297,15 @@ dialog .actions { display: flex; gap: 8px; justify-content: flex-end; }
   main { flex-direction: column; }
   #scenes { width: 100%; }
   #right { border-left: none; border-top: 1px solid var(--border); }
+}
+/* 窄屏顶栏单行化：GitHub 只留图标、设置按钮去掉"（推荐）"后缀，
+   并收紧间距/内边距，避免 640px 以下主题按钮/健康点被挤到第二行 */
+@media (max-width: 640px) {
+  header.topbar { gap: 8px; padding: 10px 12px; }
+  .brand { gap: 8px; margin-right: 0; }
+  .brand b { font-size: 13.5px; }
+  .ghlink { padding: 6px 8px; }
+  .ghlink .ghlabel { display: none; }
+  header .ghost { padding: 5px 10px; }
+  .cfgExtra { display: none; }
 }
