@@ -19,6 +19,9 @@ import audio_io  # noqa: E402
 
 app = Flask(__name__, static_folder="static")
 
+# 唯一版本号来源：前端 hero 徽章经 /api/health 同步显示，改版只改这一处
+APP_VERSION = "1.2.1"
+
 ARCHIVE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration_history")
 
 
@@ -211,9 +214,11 @@ def api_audio_file():
 def api_health():
     """草稿格式健康检查 + 剪映运行状态（供"从草稿生成 SRT"判断可用性）。"""
     try:
-        return jsonify(draft.health_check())
+        info = draft.health_check()
+        info["version"] = APP_VERSION
+        return jsonify(info)
     except Exception as e:
-        return jsonify({"ok": False, "message": f"健康检查失败: {e}", "drafts": []})
+        return jsonify({"ok": False, "message": f"健康检查失败: {e}", "drafts": [], "version": APP_VERSION})
 
 
 @app.route("/api/drafts")

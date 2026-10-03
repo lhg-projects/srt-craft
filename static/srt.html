@@ -6,18 +6,137 @@
 <meta name="description" content="开源本地字幕纠错工具：SRT 字幕 + 你的原始口播文稿 → 拼音对齐自动修正同音错字，时间轴零改动；支持导入音频 whisper 转字幕与 AI 语义校正，专为剪映口播视频工作流打造，全程本地运行。">
 <script src="/static/topbar.js" data-brand="SRT 字幕校正"></script>
 <style>
-  main { max-width: 1140px; margin: 20px auto; padding: 0 16px; display: grid;
+  /* ============ 页面级设计层（叠在 theme.css 之上；topbar.js 注入的样式表在本块之前，等特异性下这里生效） ============
+     设计方向：字幕时间轴「精密仪器」——等化器声波意象、等宽时间码、步骤徽标。
+     只动视觉：所有元素 ID 与 JS 逻辑不变。 */
+  :root {
+    --mono: "SF Mono", "Cascadia Code", ui-monospace, Menlo, Consolas, monospace;
+    --violet: #9a6bff;
+  }
+
+  /* ---------- 背景：两团柔光 + 细网格，营造"暗室仪器台"氛围 ---------- */
+  body::before {
+    content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background:
+      radial-gradient(900px 420px at 82% -8%, var(--accent-soft), transparent 65%),
+      radial-gradient(700px 380px at -10% 30%, color-mix(in srgb, var(--violet) 9%, transparent), transparent 60%);
+  }
+  body::after {
+    content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background-image:
+      linear-gradient(color-mix(in srgb, var(--border-strong) 42%, transparent) 1px, transparent 1px),
+      linear-gradient(90deg, color-mix(in srgb, var(--border-strong) 42%, transparent) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000 30%, transparent 78%);
+    -webkit-mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000 30%, transparent 78%);
+    opacity: .5;
+  }
+
+  /* ---------- 进场：一次编排好的 staggered reveal ---------- */
+  .hero, main .panel { animation: rise .55s cubic-bezier(.2,.7,.3,1) backwards; }
+  main .panel:nth-child(2) { animation-delay: .09s; }
+  @keyframes rise { from { opacity: 0; transform: translateY(12px); } }
+  @media (prefers-reduced-motion: reduce) {
+    .hero, main .panel, .eq i, .prog .fill { animation: none !important; }
+  }
+
+  /* ---------- Hero：一句话价值主张 + 等化器声波 ---------- */
+  .hero {
+    max-width: 1140px; margin: 30px auto 4px; padding: 0 16px;
+    display: flex; align-items: flex-end; justify-content: space-between; gap: 24px;
+  }
+  .hero h1 { font-size: 25px; font-weight: 700; letter-spacing: .015em; line-height: 1.35; }
+  .hero h1 em {
+    font-style: normal;
+    background: linear-gradient(92deg, var(--accent) 10%, var(--violet) 90%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero p { font-size: 13px; color: var(--text-dim); margin-top: 6px; }
+  .hero .tag {
+    display: inline-block; font-family: var(--mono); font-size: 11px; letter-spacing: .08em;
+    color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-border);
+    border-radius: 999px; padding: 2px 10px; margin-left: 10px; vertical-align: 3px;
+  }
+
+  /* ---------- 页脚签名：个人 IP 落款 ---------- */
+  .colophon {
+    max-width: 1140px; margin: 0 auto; padding: 10px 16px 16px;
+    display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap;
+    font-size: 12px; color: var(--text-faint);
+  }
+  .colophon a { color: var(--text-dim); }
+  .colophon a:hover { color: var(--accent); }
+  .colophon .dot { opacity: .5; }
+  @media (min-width: 769px) {
+    .colophon { flex-shrink: 0; padding: 6px 16px 12px; }
+  }
+  /* 等化器：一排声柱随节拍起伏，呼应"音频→字幕"主题 */
+  .eq { display: flex; align-items: flex-end; gap: 3px; height: 34px; padding-bottom: 6px; flex-shrink: 0; }
+  .eq i {
+    width: 3px; height: var(--h, 50%); border-radius: 2px; transform-origin: bottom;
+    background: linear-gradient(180deg, var(--accent), var(--violet));
+    animation: eq 1.15s ease-in-out var(--d, 0s) infinite alternate;
+  }
+  @keyframes eq { from { transform: scaleY(.22); } to { transform: scaleY(1); } }
+
+  /* ---------- 双栏布局（保留原栅格与等高策略） ---------- */
+  main { max-width: 1140px; margin: 20px auto 34px; padding: 0 16px; display: grid;
          grid-template-columns: 1fr 1fr; gap: 16px; align-items: stretch; }
-  /* 两栏等高：面板做弹性列，④ 输出框撑满剩余高度，消除右栏下方大片死区 */
   .panel { display: flex; flex-direction: column; }
-  #out { flex: 1 1 auto; min-height: 160px; }
+  #out { flex: 1 1 auto; min-height: 200px; height: auto; }
   textarea { height: 240px; }
   /* 报告条数多时内部滚动，避免把 ④ 下载区顶出首屏 */
   #report { max-height: 45vh; overflow-y: auto; overscroll-behavior: contain; }
-  #out { height: 200px; }
-  /* 设置弹窗表单：宽屏双列，≤768px 单列（内联样式会盖掉媒体查询，故定义在样式表） */
-  .cfgGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
-  /* 阶段进度条：一条龙运行时 ①转写 ②校正 各一条 */
+
+  /* ---------- 步骤徽标标题：等宽数字 + 强调色，串起 ①→④ 工序 ---------- */
+  .panel h2 { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .panel h2 .steptitle { white-space: nowrap; }
+  button, select { white-space: nowrap; }
+  .panel h2 .stepchip {
+    width: 22px; height: 22px; border-radius: 7px; flex-shrink: 0;
+    display: inline-grid; place-items: center;
+    font-family: var(--mono); font-size: 12px; font-weight: 600;
+    color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-border);
+  }
+  .panel h2 .stepsub { font-weight: 400; font-size: 12px; color: var(--text-faint); }
+
+  /* ---------- 上传控件：原生 file input 从"小灰块"变成可点击的取舍样式 ---------- */
+  input[type=file] {
+    color: var(--text-dim); font-size: 12.5px;
+    border: 1px dashed var(--border-strong); border-radius: 10px;
+    padding: 6px 10px; background: var(--bg-soft); cursor: pointer; max-width: 100%;
+    transition: border-color .15s ease, color .15s ease;
+  }
+  input[type=file]:hover { border-color: var(--accent-border); color: var(--text-dim); }
+  input[type=file]::file-selector-button {
+    border: none; background: transparent; color: var(--accent); cursor: pointer;
+    font-family: inherit; font-size: 12.5px; font-weight: 550; padding: 0 8px 0 0; margin-right: 8px;
+  }
+  input[type=file]::file-selector-button:hover { text-decoration: underline; }
+
+  /* ---------- 报告区空态 / 变更卡片 ---------- */
+  #report > .hint {
+    text-align: center; padding: 26px 18px; margin-top: 0;
+    border: 1px dashed var(--border-strong); border-radius: 12px;
+    background: color-mix(in srgb, var(--panel-2) 55%, transparent);
+  }
+  .nochange { color: var(--ok); font-size: 13.5px; padding: 12px 0; }
+  .change {
+    border: 1px solid var(--border); border-left: 3px solid var(--warn);
+    border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;
+    font-size: 13px; line-height: 1.7; background: var(--panel-2);
+  }
+  .change .meta { color: var(--text-faint); font-size: 12px; margin-bottom: 4px; font-family: var(--mono); }
+  .change .old { color: var(--err); text-decoration: line-through; }
+  .change .new { color: var(--ok); font-weight: 500; }
+
+  /* ---------- 主行动按钮：更大的存在感 ---------- */
+  #goBtn { padding: 9px 22px; font-size: 14px;
+           box-shadow: 0 1px 3px rgba(0,0,0,.25), 0 0 0 0 var(--accent-soft); }
+  #goBtn:hover:not(:disabled) { box-shadow: 0 4px 16px var(--accent-soft), 0 0 0 4px var(--accent-soft), 0 1px 3px rgba(0,0,0,.25); }
+
+  /* ---------- 状态与进度条 ---------- */
+  #status { min-height: 1em; }
   .prog { margin: 8px 0 4px; }
   .prog .track { height: 6px; border-radius: 3px; background: var(--border, #e2e8f0); overflow: hidden; }
   .prog .fill { height: 100%; width: 40%; border-radius: 3px;
@@ -25,13 +144,52 @@
     animation: progslide 1.2s ease-in-out infinite; }
   .prog .label { font-size: 12px; color: var(--text-dim, #64748b); margin-bottom: 4px; }
   @keyframes progslide { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
-  /* 窄屏单列：双栏栅格在 ≤768px 会因子元素 min-content 撑出横向滚动条 */
+
+  /* 设置弹窗表单：宽屏双列，≤768px 单列（内联样式会盖掉媒体查询，故定义在样式表） */
+  .cfgGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+
+  /* ---------- 满版适配（≥769px）：首屏收纳全部功能，页面不滚动 ---------- */
+  /* body 变 100vh 弹性列：topbar + 紧凑 hero + 弹性双栏；文本框分剩余高度，
+     面板/报告超出时内部滚动，窄屏（≤768px）不受影响仍整页滚动 */
+  @media (min-width: 769px) {
+    html, body { height: 100%; }
+    body { display: flex; flex-direction: column; overflow: hidden; }
+    .hero { flex-shrink: 0; margin: 14px auto 0; }
+    .hero h1 { font-size: 21px; }
+    .hero p { margin-top: 2px; }
+    .eq { height: 26px; padding-bottom: 2px; }
+    main { flex: 1 1 auto; width: 100%; min-height: 0;
+           margin: 12px auto 14px; grid-template-rows: minmax(0, 1fr); }
+    .panel { min-height: 0; overflow-y: auto; }
+    .panel h2 { margin-bottom: 8px; }
+    textarea { height: auto; }
+    #srt, #script, #out { flex: 1 1 0; min-height: 64px; }
+    #report { max-height: none; flex: 0 1 auto; min-height: 0; overflow-y: auto; }
+    #report > .hint { padding: 14px 18px; }
+  }
+  /* 矮窗口（含 13/14 寸笔记本满屏）：进一步压 hero 与固定文案，
+     确保左右面板内容自然装下、不出现内部滚动条 */
+  @media (min-width: 769px) and (max-height: 940px) {
+    .hero { margin: 10px auto 0; }
+    .hero h1 { font-size: 18px; }
+    .hero p, .eq { display: none; }
+    main { margin: 10px auto 12px; }
+    .panel { padding: 14px 16px; }
+    #srcAudio .hint { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    #status { margin: 6px 0 0; }
+  }
+
+  /* ---------- 窄屏 ---------- */
   @media (max-width: 768px) {
     main { grid-template-columns: 1fr; gap: 12px; }
     .panel { min-width: 0; }
     textarea { height: 160px; }
     #out { flex: none; height: 140px; }
     #cfgDialog .cfgGrid { grid-template-columns: 1fr; }
+    .hero { margin-top: 20px; }
+    .hero h1 { font-size: 20px; }
+    .hero .tag { display: none; }
+    .eq { display: none; }
   }
 </style>
 </head>
@@ -67,10 +225,19 @@
     <button id="cfgSave">保存</button>
   </div>
 </dialog>
+<section class="hero">
+  <div>
+    <h1>同音错字，<em>一键归位</em><span class="tag" id="verTag">v1.2.1 · 开源本地</span></h1>
+    <p>拼音对齐 + AI 语义双重校正 · 时间轴零改动 · 专为剪映口播工作流打造</p>
+  </div>
+  <div class="eq" aria-hidden="true">
+    <i style="--h:38%;--d:0s"></i><i style="--h:62%;--d:.12s"></i><i style="--h:30%;--d:.24s"></i><i style="--h:78%;--d:.06s"></i><i style="--h:48%;--d:.3s"></i><i style="--h:92%;--d:.18s"></i><i style="--h:56%;--d:.42s"></i><i style="--h:70%;--d:.09s"></i><i style="--h:34%;--d:.27s"></i><i style="--h:84%;--d:.39s"></i><i style="--h:52%;--d:.15s"></i><i style="--h:66%;--d:.33s"></i><i style="--h:28%;--d:.21s"></i><i style="--h:74%;--d:.45s"></i><i style="--h:44%;--d:.03s"></i><i style="--h:88%;--d:.36s"></i><i style="--h:58%;--d:.48s"></i><i style="--h:32%;--d:.51s"></i>
+  </div>
+</section>
 <main>
   <div class="panel">
-    <h2 style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">① SRT 字幕（剪映导出 / 草稿生成）
-      <span style="display:inline-flex;align-items:center;gap:8px">
+    <h2><span class="stepchip">1</span><span class="steptitle">SRT 字幕</span><span class="stepsub">剪映导出 / 草稿生成</span>
+      <span style="display:inline-flex;align-items:center;gap:8px;margin-left:auto">
       <select id="srcSel" style="margin-left:8px;font-size:13px" title="选择字幕来源；选定后记住为默认，下次打开仍生效">
         <option value="draft">来源：从草稿生成</option>
         <option value="audio">来源：导入音频生成</option>
@@ -106,7 +273,7 @@
     </div>
     <textarea id="srt" class="mono" placeholder="粘贴标准 SRT 内容：&#10;1&#10;00:00:00,100 --> 00:00:02,500&#10;字幕文本"></textarea>
     <div class="hint">支持剪映「导出字幕」生成的 SRT，时间轴会原样保留，校正只改文本。</div>
-    <h2 style="margin-top:16px">② 原始文稿（正确版 · 无原稿可留空）</h2>
+    <h2 style="margin-top:16px"><span class="stepchip">2</span><span class="steptitle">原始文稿</span><span class="stepsub">正确版 · 无原稿可留空</span></h2>
     <input type="file" id="scriptFile" accept=".txt,.md">
     <textarea id="script" style="margin-top:8px" placeholder="粘贴你写的原始文稿，或点击上面选择 .txt 文件上传；无原稿可留空（自动使用 AI 校对）"></textarea>
     <div id="progCal" class="prog" style="display:none">
@@ -121,9 +288,9 @@
     <div id="status"></div>
   </div>
   <div class="panel">
-    <h2>③ 校正报告</h2>
+    <h2><span class="stepchip">3</span><span class="steptitle">校正报告</span></h2>
     <div id="report"><div class="hint">校正结果会显示在这里：每一处修改都列出原句与新句，供你核对。</div></div>
-    <h2 style="margin-top:16px">④ 修正版 SRT（导入剪映用）</h2>
+    <h2 style="margin-top:16px"><span class="stepchip">4</span><span class="steptitle">修正版 SRT</span><span class="stepsub">导入剪映用</span></h2>
     <textarea id="out" class="mono" placeholder="校正后的 SRT 会显示在这里"></textarea>
     <div class="row">
       <button id="dlBtn" disabled title="首次保存弹对话框选位置；本次会话内再点直接保存到上次位置；Shift+点击 = 另存为"><svg class="ic" aria-hidden="true"><use href="#i-download"/></svg> 下载修正版 .srt</button>
@@ -133,12 +300,25 @@
     </div>
   </div>
 </main>
+<footer class="colophon">
+  <span>出品 <a href="https://github.com/lhg-projects" target="_blank" rel="noopener">lhg-projects</a> · 刘洪光（安徽合肥）</span>
+  <span class="dot">·</span>
+  <span>视频号搜「<a href="https://github.com/lhg-projects" target="_blank" rel="noopener" title="视频号：刘洪光实名上网">刘洪光实名上网</a>」</span>
+  <span class="dot">·</span>
+  <a href="https://github.com/lhg-projects/srt-craft" target="_blank" rel="noopener">GitHub 开源仓库</a>
+  <span class="dot">·</span>
+  <span>MIT © 2026</span>
+</footer>
 <script>
 const $ = s => document.querySelector(s);
 function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
 async function init() {
   const ds = await (await fetch('/api/drafts')).json();
+  // 版本徽章与服务端同步（/api/health 的 version 字段是唯一来源；失败保留静态文字作降级）
+  fetch('/api/health').then(r => r.json()).then(h => {
+    if (h.version) $('#verTag').textContent = `v${h.version} · 开源本地`;
+  }).catch(() => {});
   $('#draftSel').innerHTML = '<option value="">选择草稿…</option>' +
     ds.map(d => `<option value="${esc(d.name)}">${esc(d.name)}</option>`).join('');
   $('#genBtn').onclick = genSrt;
