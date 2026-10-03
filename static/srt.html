@@ -110,9 +110,10 @@
     <h2 style="margin-top:16px">④ 修正版 SRT（导入剪映用）</h2>
     <textarea id="out" class="mono" placeholder="校正后的 SRT 会显示在这里"></textarea>
     <div class="row">
-      <button id="dlBtn" disabled>⬇️ 下载修正版 .srt</button>
-      <button id="dlAudioBtn" disabled style="display:none" title="与 SRT 同一裁剪参数，时间轴对齐，可一起导入剪映">🎧 下载裁剪后音频</button>
-      <button id="dlAllBtn" disabled style="display:none" title="SRT + 处理后音频打包成一个 zip，解压后一起导入剪映">📦 一键下载（SRT + 音频）</button>
+      <button id="dlBtn" disabled title="点击保存到上次的位置；按住 Shift 点击 = 另存为（换路径）">⬇️ 下载修正版 .srt</button>
+      <button id="dlAudioBtn" disabled style="display:none" title="点击保存到上次的位置；按住 Shift 点击 = 另存为">🎧 下载裁剪后音频</button>
+      <button id="dlAllBtn" disabled style="display:none" title="点击保存到上次的位置；按住 Shift 点击 = 另存为">📦 一键下载（SRT + 音频）</button>
+      <button class="ghost" id="dlSaveAsBtn" style="display:none;padding:4px 10px;font-size:12px" title="下次下载弹窗选新位置，并记住为新默认">↪ 换保存位置</button>
       <span class="hint" style="margin:0">剪映里：文本 → 字幕 → 导入字幕（或拖入 SRT）→ 删除旧字幕轨</span>
     </div>
   </div>
@@ -129,9 +130,10 @@ async function init() {
   $('#srtFile').onchange = e => readFile(e, $('#srt'));
   $('#scriptFile').onchange = e => readFile(e, $('#script'));
   $('#goBtn').onclick = calibrate;
-  $('#dlBtn').onclick = download;
-  $('#dlAudioBtn').onclick = downloadCutAudio;
-  $('#dlAllBtn').onclick = downloadAll;
+  $('#dlBtn').onclick = e => download({ forceDialog: e.shiftKey });
+  $('#dlAudioBtn').onclick = e => downloadCutAudio(e.shiftKey);
+  $('#dlAllBtn').onclick = e => downloadAll(e.shiftKey);
+  $('#dlSaveAsBtn').onclick = () => download({ forceDialog: true });
   $('#cfgBtn').onclick = openCfg;
   $('#cfgProvider').onchange = () => { applyPreset(); showTips($('#cfgProvider').value); };
   $('#cfgEye').onclick = toggleKeyEye;
@@ -459,6 +461,7 @@ async function calibrate() {
     $('#status').className = r.applied ? 'ok' : '';
     $('#out').value = r.srt;
     $('#dlBtn').disabled = false;
+    document.getElementById('dlSaveAsBtn').style.display = '';
     refreshAudioBtn();  // out 就绪 → 「一键下载」按钮亮起
     $('#report').innerHTML = !r.changes.length
       ? '<div class="nochange">✅ 未发现需要修改的地方，SRT 与文稿一致。</div>'
@@ -476,17 +479,72 @@ async function calibrate() {
   }
 }
 
-function download() {
-  const name = $('#draftSel').value || 'subtitles';
-  const blob = new Blob([$('#out').value], {type: 'application/x-subrip;charset=utf-8'});
+// ---------- 下载位置记忆（File System Access API） ----------
+// 首次保存弹系统对话框选路径；之后默认写上次的文件（不弹框）；
+// 按住 Shift 点击 = 另存为（换路径，记忆随之更新）。不支持的浏览器回退普通下载。
+
+function _idbOpen() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open('srtcraft_save', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('handles');
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function _idbGet(key) {
+  const db = await _idbOpen();
+  return new Promise((res, rej) => {
+    const t = db.transaction('handles').objectStore('handles').get(key);
+    t.onsuccess = () => res(t.result); t.onerror = () => rej(t.error);
+  });
+}
+async function _idbSet(key, val) {
+  const db = await _idbOpen();
+  return new Promise((res, rej) => {
+    const t = db.transaction('handles', 'readwrite');
+    t.objectStore('handles').put(val, key);
+    t.oncomplete = () => res(); t.onerror = () => rej(t.error);
+  });
+}
+function legacyDownload(blob, name) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = name.replace(/[\\/:*?"<>|\s]+/g, '_') + '_修正.srt';
+  a.download = name;
   a.click();
   URL.revokeObjectURL(a.href);
 }
 
-async function downloadCutAudio() {
+async function saveBlobRemembered(blob, suggestedName, key, opts = {}) {
+  // 返回实际写入的文件名；forceDialog（或 Shift 点击）= 另存为并更新记忆
+  const forceDialog = opts.forceDialog;
+  if (!('showSaveFilePicker' in window)) { legacyDownload(blob, suggestedName); return suggestedName; }
+  let handle = null;
+  if (!forceDialog) handle = await _idbGet(key);
+  if (handle) {
+    let perm = await handle.queryPermission({ mode: 'readwrite' });
+    if (perm !== 'granted') perm = await handle.requestPermission({ mode: 'readwrite' });
+    if (perm === 'granted') {
+      const w = await handle.createWritable(); await w.write(blob); await w.close();
+      return handle.name;
+    }
+  }
+  handle = await showSaveFilePicker({ suggestedName });
+  await _idbSet(key, handle);
+  const w = await handle.createWritable(); await w.write(blob); await w.close();
+  return handle.name;
+}
+
+function download({ forceDialog = false } = {}) {
+  if (!$('#out').value.trim()) return;
+  const name = $('#draftSel').value || 'subtitles';
+  const blob = new Blob([$('#out').value], {type: 'application/x-subrip;charset=utf-8'});
+  saveBlobRemembered(blob, name.replace(/[\\/:*?"<>|\s]+/g, '_') + '_修正.srt', 'srt', { forceDialog })
+    .then(fn => { $('#status').textContent = '✅ 已保存：' + fn; $('#status').className = 'ok'; })
+    .catch(e => { if (e && e.name === 'AbortError') return;  // 用户取消另存为
+      $('#status').textContent = '保存失败: ' + e; $('#status').className = 'err'; });
+}
+
+async function downloadCutAudio(forceDialog = false) {
   if (!audioPath) return;
   try {
     // prepare 已处理完（裁剪+变速），直接下载该成品；文件名沿用上传原名
@@ -495,17 +553,18 @@ async function downloadCutAudio() {
       body: JSON.stringify({ audio_path: audioPath, original_name: audioOriginalName })
     })).json();
     if (!r.ok) { $('#status').textContent = r.error; $('#status').className = 'err'; return; }
-    const a = document.createElement('a');
-    a.href = r.download_url;
-    a.download = r.filename;
-    a.click();
+    const blob = await (await fetch(r.download_url)).blob();
+    const fn = await saveBlobRemembered(blob, r.filename, 'audio', { forceDialog });
+    $('#status').textContent = '✅ 已保存：' + fn;
+    $('#status').className = 'ok';
   } catch (e) {
+    if (e && e.name === 'AbortError') return;
     $('#status').textContent = '音频下载失败: ' + e;
     $('#status').className = 'err';
   }
 }
 
-async function downloadAll() {
+async function downloadAll(forceDialog = false) {
   if (!audioPath || !$('#out').value.trim()) return;
   $('#status').textContent = '打包中…';
   $('#status').className = '';
@@ -524,14 +583,12 @@ async function downloadAll() {
       return;
     }
     const blob = await r.blob();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = (audioOriginalName || 'subtitles').replace(/[\\/:*?"<>|\s]+/g, '_') + '_字幕音频打包.zip';
-    a.click();
-    URL.revokeObjectURL(a.href);
-    $('#status').textContent = '✅ 已打包下载：修正版 .srt + 处理后音频';
+    const zipName = (audioOriginalName || 'subtitles').replace(/[\\/:*?"<>|\s]+/g, '_') + '_字幕音频打包.zip';
+    const fn = await saveBlobRemembered(blob, zipName, 'zip', { forceDialog });
+    $('#status').textContent = '✅ 已保存：' + fn + '（修正版 .srt + 处理后音频）';
     $('#status').className = 'ok';
   } catch (e) {
+    if (e && e.name === 'AbortError') return;
     $('#status').textContent = '打包下载失败: ' + e;
     $('#status').className = 'err';
   }
