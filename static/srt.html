@@ -56,12 +56,15 @@
 </dialog>
 <main>
   <div class="panel">
-    <h2>① SRT 字幕（剪映导出 / 草稿生成）
+    <h2 style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">① SRT 字幕（剪映导出 / 草稿生成）
+      <span style="display:inline-flex;align-items:center;gap:8px">
       <select id="srcSel" style="margin-left:8px;font-size:13px" title="选择字幕来源；选定后记住为默认，下次打开仍生效">
         <option value="draft">来源：从草稿生成</option>
         <option value="audio">来源：导入音频生成</option>
       </select>
       <button class="ghost" id="srcReset" style="padding:4px 10px;font-size:12px" title="清除记住的默认来源，回到「从草稿生成」">恢复默认</button>
+      <button class="ghost" id="pageReload" style="padding:4px 8px;font-size:13px" title="刷新整个页面（清空当前填写内容，重新开始）">↻</button>
+      </span>
     </h2>
     <div id="srcDraft">
     <div class="row" style="margin:0 0 10px">
@@ -153,6 +156,7 @@ let audioOriginalName = '';  // 上传时的原始文件名（去扩展名），
 
 async function initSource() {
   $('#srcSel').onchange = () => { applySource(); saveDefaultSource(); };
+  $('#pageReload').onclick = () => location.reload();
   $('#srcReset').onclick = async () => {
     await fetch('/api/srt/default_source', { method: 'DELETE' });
     $('#srcSel').value = 'draft';
