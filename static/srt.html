@@ -57,6 +57,16 @@
     color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-border);
     border-radius: 999px; padding: 2px 10px; margin-left: 10px; vertical-align: 3px;
   }
+  /* 新版本提醒徽章：红色实底，点击直达 Releases；hidden 需显式声明
+     （.tag 的 display:inline-block 会盖掉 hidden 属性的 UA display:none） */
+  .hero .tag.newver {
+    color: #fff; background: var(--err, #c62c2c); border-color: transparent;
+    text-decoration: none; animation: newverpulse 2.2s ease-in-out infinite;
+  }
+  .hero .tag.newver[hidden] { display: none; }
+  .hero .tag.newver:hover { filter: brightness(1.12); transform: translateY(-1px); animation-play-state: paused; }
+  @keyframes newverpulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--err, #c62c2c) 35%, transparent); }
+                           50% { box-shadow: 0 0 0 5px transparent; } }
 
   /* ---------- 页脚签名：个人 IP 落款 ---------- */
   .colophon {
@@ -227,7 +237,7 @@
 </dialog>
 <section class="hero">
   <div>
-    <h1>同音错字，<em>一键归位</em><span class="tag" id="verTag">v1.2.1 · 开源本地</span></h1>
+    <h1>同音错字，<em>一键归位</em><span class="tag" id="verTag">v1.2.1 · 开源本地</span><a class="tag newver" id="newVer" href="https://github.com/lhg-projects/srt-craft/releases" target="_blank" rel="noopener" hidden></a></h1>
     <p>拼音对齐 + AI 语义双重校正 · 时间轴零改动 · 专为剪映口播工作流打造</p>
   </div>
   <div class="eq" aria-hidden="true">
@@ -296,7 +306,7 @@
       <button id="dlBtn" disabled title="每次保存都会弹对话框选位置，自动定位到上次保存的目录"><svg class="ic" aria-hidden="true"><use href="#i-download"/></svg> 下载修正版 .srt</button>
       <button id="dlAudioBtn" disabled style="display:none" title="每次保存都会弹对话框选位置，自动定位到上次保存的目录"><svg class="ic" aria-hidden="true"><use href="#i-headphones"/></svg> 下载裁剪后音频</button>
       <button id="dlAllBtn" disabled style="display:none" title="每次保存都会弹对话框选位置，自动定位到上次保存的目录"><svg class="ic" aria-hidden="true"><use href="#i-box"/></svg> 一键下载（SRT + 音频）</button>
-      <span class="hint" style="margin:0">剪映里：文本 → 字幕 → 导入字幕（或拖入 SRT）→ 删除旧字幕轨</span>
+      <span class="hint" style="margin:0">剪映里：文本 → 字幕 → 删除旧字幕轨 → 导入字幕（或拖入 SRT）</span>
     </div>
   </div>
 </main>
@@ -316,8 +326,21 @@ function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
 async function init() {
   const ds = await (await fetch('/api/drafts')).json();
   // 版本徽章与服务端同步（/api/health 的 version 字段是唯一来源；失败保留静态文字作降级）
+  // 再与远端 version.json 比对，本地落后则显示「有新版本」提醒（点击直达 Releases）
   fetch('/api/health').then(r => r.json()).then(h => {
-    if (h.version) $('#verTag').textContent = `v${h.version} · 开源本地`;
+    if (!h.version) return;
+    $('#verTag').textContent = `v${h.version} · 开源本地`;
+    const nums = s => s.split('.').map(Number);
+    const isNewer = (a, b) => { const x = nums(a), y = nums(b); return x[0] > y[0] || (x[0] === y[0] && (x[1] > y[1] || (x[1] === y[1] && x[2] > y[2]))); };
+    fetch('/static/version.json?ts=' + Date.now(), { cache: 'no-store' })
+      .then(r => r.json())
+      .then(v => {
+        if (v.version && v.version !== h.version && isNewer(v.version, h.version)) {
+          $('#newVer').textContent = `有新版本 v${v.version}`;
+          $('#newVer').hidden = false;
+        }
+      })
+      .catch(() => {});
   }).catch(() => {});
   $('#draftSel').innerHTML = '<option value="">选择草稿…</option>' +
     ds.map(d => `<option value="${esc(d.name)}">${esc(d.name)}</option>`).join('');

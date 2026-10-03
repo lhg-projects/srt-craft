@@ -19,7 +19,8 @@ import audio_io  # noqa: E402
 
 app = Flask(__name__, static_folder="static")
 
-# 唯一版本号来源：前端 hero 徽章经 /api/health 同步显示，改版只改这一处
+# 版本号来源：前端徽章经 /api/health 同步显示。发新版改这里 + static/version.json
+# （version.json 是 GitHub 上用户本地版本的比对基准，两处必须一起改，README 更新日志同步）
 APP_VERSION = "1.2.1"
 
 ARCHIVE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration_history")
