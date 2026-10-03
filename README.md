@@ -83,16 +83,19 @@
 
 ## 快速开始
 
-**Windows**：双击 `start_windows.bat`（自动创建虚拟环境并安装依赖），浏览器开 <http://127.0.0.1:8765>
-
-**macOS**：
+**macOS / Linux 一键安装**（AI 助手 / 终端直接执行；自动装依赖 → 启动 → 冒烟测试，全过才报成功）：
 
 ```bash
-git clone https://github.com/lhg-projects/srt-craft.git
-cd srt-craft
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python app.py
+git clone https://github.com/lhg-projects/srt-craft.git && cd srt-craft && bash install.sh
 ```
+
+或完全不动手：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/lhg-projects/srt-craft/main/install.sh)
+```
+
+**Windows**：双击 `start_windows.bat`（自动创建虚拟环境并安装依赖），浏览器开 <http://127.0.0.1:8765>
 
 依赖：Python 3.10+；ffmpeg / ffprobe 在 PATH 时解锁音频导入与草稿导出（`brew install ffmpeg`）。
 
