@@ -34,6 +34,22 @@ _STRIP_RE = None
 _DOT_RE = None
 
 
+_T2S = None
+
+
+def _opencc_t2s(text):
+    """繁→简（condition_on_previous_text=False 后部分窗口会漂成繁体）。
+    opencc 未安装时原样返回，不阻塞转写。"""
+    global _T2S
+    if _T2S is None:
+        try:
+            from opencc import OpenCC
+            _T2S = OpenCC("t2s")
+        except ImportError:
+            _T2S = False
+    return _T2S.convert(text) if _T2S else text
+
+
 def strip_punct(text):
     """去标点：字幕更美观（时间轴靠字符比例内插，与断句解耦）。
     两步走：先去标点类（不含点号），再去非法位置的点——
@@ -42,10 +58,9 @@ def strip_punct(text):
     if _STRIP_RE is None:
         import re
         _STRIP_RE = re.compile(
-            r"[。！？；，、：""''""…—·\-\[\]\(\)（）【】《》<>\"'!?,;:~～`]+")
+            r"[。！？；，、：""''""…—·\-[\]\(\)（）【】《》<>\"'!?,;:~～`]+")
         _DOT_RE = re.compile(r"(?<!\d)\.(?!\d)|\.(?=\s|$)")
-    return _DOT_RE.sub("", _STRIP_RE.sub("", text)).strip()
-    return _STRIP_RE.sub("", text).strip()
+    return _DOT_RE.sub("", _STRIP_RE.sub("", _opencc_t2s(text))).strip()
 
 
 def split_segment(text, start, end, max_chars=DEFAULT_MAX_CHARS):
@@ -108,12 +123,15 @@ def transcribe_to_srt(wav_path, cfg=None, initial_prompt=None):
     "市盈率→适应率""三季报→3计报"这类领域词错字。"""
     cfg = cfg or {}
     model = _get_model(cfg)
-    _default_prompt = ("以下是普通话财经口播内容，包含金融术语：市盈率、业绩预增、"
-                       "三季报、季报、市值、营收、同比增长。")
+    _default_prompt = ("以下是普通话简体中文财经口播内容，包含金融术语：市盈率、业绩预增、"
+                       "三季报、季报、市值、营收、同比增长。简体中文字幕。")
     segments, info = model.transcribe(
         wav_path, beam_size=5,
         initial_prompt=initial_prompt or _default_prompt,
-        vad_filter=True)
+        vad_filter=True,
+        # 上下文累积会导致长音频中途丢段（实测 223s 口播在 30-54s 整段漏转 23s，
+        # 单独喂该区间则正常）。关掉后每个窗口独立解码，覆盖率完整。
+        condition_on_previous_text=False)
     max_chars = int(cfg.get("asr_max_chars", DEFAULT_MAX_CHARS) or DEFAULT_MAX_CHARS)
     srt_text, _count = build_srt_from_segments(
         ((seg.text, seg.start, seg.end) for seg in segments), max_chars=max_chars)
