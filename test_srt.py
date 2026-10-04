@@ -48,6 +48,13 @@ class TestParseSrt(unittest.TestCase):
         self.assertAlmostEqual(es[1]["start_sec"], 3.0, places=2)
 
 
+def _ai_configured():
+    """AI 模式测试依赖已配置的 API 密钥（或 Ollama 本地服务），未配置则跳过。"""
+    import ai_subfix
+    cfg = ai_subfix.load_config()
+    return bool((cfg.get("ai_api_key") or "").strip()) or cfg.get("ai_provider") == "ollama"
+
+
 class TestCalibrateSrt(unittest.TestCase):
     # 台账 2026-09-30：重建模式按用户指示删除，覆盖其场景的重建用例一并移除（异音/多字用 AI 模式）
 
@@ -76,6 +83,8 @@ class TestCalibrateSrt(unittest.TestCase):
 
     def test_no_script_ai_mode(self):
         """无原稿（script 空）→ AI 纯校对模式：修同音/专名，保留正确行。"""
+        if not _ai_configured():
+            self.skipTest("未配置 AI API 密钥（config.json），跳过依赖外部 AI 服务的用例")
         srt_typo = ("1\n00:00:00,500 --> 00:00:02,500\n他的事绩很感人\n\n"
                     "2\n00:00:03,000 --> 00:00:04,000\n印尼孽股产能持续释放\n\n"
                     "3\n00:00:05,000 --> 00:00:07,000\n这个票我现在依然看好\n")
@@ -86,22 +95,13 @@ class TestCalibrateSrt(unittest.TestCase):
         self.assertIn("这个票我现在依然看好", out)
 
     def test_ai_mode(self):
+        if not _ai_configured():
+            self.skipTest("未配置 AI API 密钥（config.json），跳过依赖外部 AI 服务的用例")
         srt_typo = SRT_OK.replace("事迹", "事绩").replace("镍价", "虐价")
         out, changes, applied, notes = srtfix.calibrate_srt(srt_typo, SCRIPT_OK, ai=True)
         self.assertEqual(applied, 2)
         self.assertIn("事迹", out)
         self.assertIn("镍价", out)
-
-    def test_no_script_ai_mode(self):
-        """无原稿（script 空）→ AI 纯校对：修同音/专名，保留正确行（引擎层）。"""
-        srt_typo = ("1\n00:00:00,500 --> 00:00:02,500\n他的事绩很感人\n\n"
-                    "2\n00:00:03,000 --> 00:00:04,000\n印尼孽股产能持续释放\n\n"
-                    "3\n00:00:05,000 --> 00:00:07,000\n这个票我现在依然看好\n")
-        out, changes, applied, notes = srtfix.calibrate_srt(srt_typo, "", ai=True)
-        self.assertEqual(applied, 2)
-        self.assertIn("他的事迹很感人", out)
-        self.assertIn("印尼镍钴产能持续释放", out)
-        self.assertIn("这个票我现在依然看好", out)
 
 
 class TestSrtApi(unittest.TestCase):
@@ -122,6 +122,8 @@ class TestSrtApi(unittest.TestCase):
     def test_empty_script_forces_ai(self):
         """无原稿（script 空）→ 服务端自动切换 AI 校对（判定依据：无对齐参照系，
         拼音对齐不成立）。即使请求只给了 phonetic 也强制走 AI。"""
+        if not _ai_configured():
+            self.skipTest("未配置 AI API 密钥（config.json），跳过依赖外部 AI 服务的用例")
         srt_typo = ("1\n00:00:00,500 --> 00:00:02,500\n他的事绩很感人\n\n"
                     "2\n00:00:03,000 --> 00:00:04,000\n印尼孽股产能持续释放\n")
         r = self.client.post("/api/srt/calibrate", json={"srt": srt_typo, "script": ""})
