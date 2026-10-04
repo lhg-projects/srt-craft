@@ -21,7 +21,7 @@ app = Flask(__name__, static_folder="static")
 
 # 版本号来源：前端徽章经 /api/health 同步显示。发新版改这里 + static/version.json
 # （version.json 是 GitHub 上用户本地版本的比对基准，两处必须一起改，README 更新日志同步）
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.3.0"
 
 ARCHIVE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration_history")
 
@@ -198,6 +198,37 @@ def api_audio_download_all():
     buf.seek(0)
     return send_file(buf, as_attachment=True, download_name=f"{name}_字幕音频打包.zip",
                      mimetype="application/zip")
+
+
+@app.route("/api/jianying/import", methods=["POST"])
+def api_jianying_import():
+    """一键导入剪映：用修正版 SRT（+可选处理后音频）在剪映草稿库新建草稿。
+    body = {srt, audio_path?}。总是新建草稿，绝不写回现有草稿。"""
+    import draft as draft_mod
+    body = request.get_json(force=True)
+    srt_text = body.get("srt", "")
+    if not srt_text.strip():
+        return jsonify({"ok": False, "error": "还没有修正版 SRT，请先完成校正"}), 400
+    audio_path = body.get("audio_path") or None
+    if audio_path and not os.path.isfile(audio_path):
+        audio_path = None  # 音频缺失不阻塞：只导字幕轨
+    r = draft_mod.import_jianying_draft(srt_text, audio_path=audio_path)
+    return jsonify(r), (200 if r.get("ok") else 500)
+
+
+@app.route("/api/jianying/status", methods=["GET"])
+def api_jianying_status():
+    """剪映导入前置状态：剪映安装/运行、草稿目录可写、pyJianYingDraft 依赖。"""
+    import importlib.util
+    import draft as draft_mod
+    from platforms import jianying_running
+    return jsonify({
+        "ok": True,
+        "jianying_running": jianying_running(),
+        "draft_root_exists": os.path.isdir(draft_mod.DRAFT_ROOT),
+        "draft_root": str(draft_mod.DRAFT_ROOT),
+        "pyjyd_installed": importlib.util.find_spec("pyJianYingDraft") is not None,
+    })
 
 
 @app.route("/api/audio/file")
