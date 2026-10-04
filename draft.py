@@ -252,9 +252,22 @@ def import_jianying_draft(srt_text, audio_path=None, draft_name=None):
             except Exception:
                 c = {}
             c["text"] = s["text"]
+            # 样式范围必须跟随新文本长度：模板的 styles.range 是模板文本的字符区间，
+            # 新文本更长时超出部分没有样式定义，剪映会用默认巨型字号渲染（炸字）；
+            # 更短时样式越界。字幕样式是均匀的，取第一条样式覆盖全文即可。
+            n = len(s["text"])
+            styles = c.get("styles") or []
+            if styles:
+                styles[0]["range"] = [0, n]
+                c["styles"] = [styles[0]]
             mat["content"] = json.dumps(c, ensure_ascii=False)
             if "base_content" in mat:
                 mat["base_content"] = s["text"]
+            # 自动字幕遗留的字级时间轴/识别信息指向模板旧文本，一并清掉
+            for k in ("words", "current_words", "recognize_text", "recognize_task_id",
+                      "subtitle_keywords", "lyrics_template", "caption_template_info"):
+                if k in mat:
+                    mat[k] = [] if isinstance(mat[k], list) else ""
             seg["target_timerange"] = {"start": s["start"], "duration": s["end"] - s["start"]}
             if "render_timerange" in seg:
                 seg["render_timerange"] = {"start": s["start"], "duration": s["end"] - s["start"]}
