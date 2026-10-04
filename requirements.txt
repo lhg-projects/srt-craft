@@ -5,3 +5,5 @@ pypinyin>=0.51
 cryptography>=42.0
 litellm>=1.40
 faster-whisper>=1.0
+pyJianYingDraft>=0.3.0
+opencc-python-reimplemented>=0.1.7
