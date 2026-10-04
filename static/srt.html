@@ -306,6 +306,7 @@
       <button id="dlBtn" disabled title="每次保存都会弹对话框选位置，自动定位到上次保存的目录"><svg class="ic" aria-hidden="true"><use href="#i-download"/></svg> 下载修正版 .srt</button>
       <button id="dlAudioBtn" disabled style="display:none" title="每次保存都会弹对话框选位置，自动定位到上次保存的目录"><svg class="ic" aria-hidden="true"><use href="#i-headphones"/></svg> 下载裁剪后音频</button>
       <button id="dlAllBtn" disabled style="display:none" title="每次保存都会弹对话框选位置，自动定位到上次保存的目录"><svg class="ic" aria-hidden="true"><use href="#i-box"/></svg> 一键下载（SRT + 音频）</button>
+      <button id="jyImportBtn" disabled style="display:none" title="在剪映草稿库新建草稿：修正版字幕轨 + 配音音频轨一次就位，打开剪映即可用"><svg class="ic" aria-hidden="true"><use href="#i-type"/></svg> 导入剪映</button>
       <span class="hint" style="margin:0">剪映里：文本 → 字幕 → 删除旧字幕轨 → 导入字幕（或拖入 SRT）</span>
     </div>
   </div>
@@ -351,6 +352,11 @@ async function init() {
   $('#dlBtn').onclick = e => download({ forceDialog: e.shiftKey });
   $('#dlAudioBtn').onclick = e => downloadCutAudio(e.shiftKey);
   $('#dlAllBtn').onclick = e => downloadAll(e.shiftKey);
+  $('#jyImportBtn').onclick = importToJianying;
+  // 「导入剪映」按钮：仅当本机是剪映草稿环境（桌面端）时显示
+  fetch('/api/jianying/status').then(r => r.json()).then(s => {
+    if (s.ok && s.draft_root_exists && s.pyjyd_installed) window._jyAvailable = true;
+  }).catch(() => {});
   $('#cfgBtn').onclick = openCfg;
   $('#cfgProvider').onchange = () => { applyPreset(); showTips($('#cfgProvider').value); };
   $('#cfgEye').onclick = toggleKeyEye;
@@ -435,6 +441,34 @@ function refreshAudioBtn() {
   const allBtn = $('#dlAllBtn');
   allBtn.style.display = armed ? '' : 'none';
   allBtn.disabled = !armed || !$('#out').value.trim();  // 还需有修正版 SRT
+  // 「导入剪映」：本机是剪映草稿环境 + 已有修正版 SRT 即可用（音频可选，不强求）
+  const jyBtn = $('#jyImportBtn');
+  jyBtn.style.display = window._jyAvailable ? '' : 'none';
+  jyBtn.disabled = !$('#out').value.trim();
+}
+
+// 一键导入剪映：新建草稿（字幕轨 + 可选音频轨），成功后提示去剪映首页刷新
+async function importToJianying() {
+  const srt = $('#out').value.trim();
+  if (!srt) return;
+  const btn = $('#jyImportBtn');
+  btn.disabled = true;
+  $('#status').textContent = '正在生成剪映草稿…';
+  $('#status').className = '';
+  try {
+    const r = await (await fetch('/api/jianying/import', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ srt, audio_path: audioPath || null })
+    })).json();
+    if (!r.ok) { $('#status').textContent = '❌ ' + (r.error || '导入失败'); $('#status').className = 'err'; return; }
+    $('#status').textContent = `✅ 已导入剪映：草稿「${r.draft_name}」。剪映首页点刷新（或重启剪映）即可看到`;
+    $('#status').className = 'ok';
+  } catch (e) {
+    $('#status').textContent = '❌ 导入失败: ' + e;
+    $('#status').className = 'err';
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function saveDefaultSource() {
