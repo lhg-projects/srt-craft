@@ -21,7 +21,7 @@ app = Flask(__name__, static_folder="static")
 
 # 版本号来源：前端徽章经 /api/health 同步显示。发新版改这里 + static/version.json
 # （version.json 是 GitHub 上用户本地版本的比对基准，两处必须一起改，README 更新日志同步）
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.3.2"
 
 ARCHIVE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration_history")
 
@@ -265,7 +265,7 @@ def api_config():
     if request.method == "POST":
         cfg = ai_subfix.load_config()
         body = request.get_json(force=True)
-        for k in ("ai_provider", "ai_base_url", "ai_api_key", "ai_model"):
+        for k in ("ai_provider", "ai_base_url", "ai_api_key", "ai_model", "ai_format"):
             if k in body:
                 cfg[k] = body[k].strip()
         ai_subfix.save_config(cfg)
@@ -274,6 +274,9 @@ def api_config():
         "ai_provider": cfg.get("ai_provider", ""),
         "ai_base_url": cfg.get("ai_base_url", ""),
         "ai_model": cfg.get("ai_model", ""),
+        "ai_format": cfg.get("ai_format", "chat"),
+        "ai_formats": [{"id": k, "label": v["label"], "tip": v["tip"]}
+                       for k, v in ai_subfix.API_FORMATS.items()],
         "ai_api_key_set": bool(cfg.get("ai_api_key")),
         "providers": [{"id": k, "label": v["label"], "base_url": v["base_url"],
                        "model": v["model"],
