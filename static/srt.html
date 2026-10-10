@@ -221,6 +221,8 @@
       </div>
       <div class="hint" style="margin:10px 0 4px">Base Url</div>
       <input type="text" id="cfgUrl" placeholder="API 地址，如 https://api.openai.com/v1">
+      <div class="hint" style="margin:10px 0 4px">API 格式</div>
+      <select id="cfgFormat"></select>
       <div class="hint" style="margin:10px 0 4px">模型名称</div>
       <input type="text" id="cfgModel" placeholder="模型名，如 gpt-4o-mini">
       <div class="row" style="margin-top:14px">
@@ -270,8 +272,8 @@
         <span id="audioInfo" class="hint" style="margin:0"></span>
       </div>
       <div class="row" style="margin:0 0 10px">
-        <label style="font-size:13px">剪掉开头 <input type="number" id="headSec" min="0" step="0.5" value="0" style="width:64px"> 秒</label>
-        <label style="font-size:13px">剪掉结尾 <input type="number" id="tailSec" min="0" step="0.5" value="0" style="width:64px"> 秒</label>
+        <label style="font-size:13px">剪掉开头 <input type="number" id="headSec" min="0" step="0.1" value="0" style="width:64px"> 秒</label>
+        <label style="font-size:13px">剪掉结尾 <input type="number" id="tailSec" min="0" step="0.1" value="0" style="width:64px"> 秒</label>
         <label style="font-size:13px" title="给音频整体加速（成片节奏更紧凑），变速不变调；处理后音频与 SRT 时间轴对齐">倍速 <input type="number" id="speedX" min="0.5" max="2" step="0.1" value="1.1" style="width:56px"> ×</label>
         <button class="ghost" id="asrBtn" disabled><svg class="ic" aria-hidden="true"><use href="#i-mic"/></svg> 生成 SRT（whisper）</button>
       </div>
@@ -576,6 +578,11 @@ async function openCfg() {
       `<option value="${p.id}">${p.label}</option>`).join('');
   }
   $('#cfgProvider').value = r.ai_provider || 'openai';
+  const fmtSel = $('#cfgFormat');
+  fmtSel.innerHTML = (r.ai_formats || []).map(f =>
+    `<option value="${f.id}" title="${esc(f.tip)}">${f.label}</option>`).join('');
+  fmtSel.value = r.ai_format || 'chat';
+  if (!fmtSel.value && fmtSel.options.length) fmtSel.value = fmtSel.options[0].value;
   $('#cfgUrl').value = r.ai_base_url || '';
   $('#cfgModel').value = r.ai_model || '';
   $('#cfgKey').value = '';
@@ -626,7 +633,8 @@ function applyPreset() {
 }
 
 async function saveCfg(opts = {}) {
-  const body = { ai_provider: $('#cfgProvider').value, ai_base_url: $('#cfgUrl').value, ai_model: $('#cfgModel').value };
+  const body = { ai_provider: $('#cfgProvider').value, ai_base_url: $('#cfgUrl').value,
+                 ai_format: $('#cfgFormat').value, ai_model: $('#cfgModel').value };
   if ($('#cfgKey').value.trim()) {
     if (wasKeySet && !opts.silent && !confirm("将覆盖已保存的 API 密钥，确认？")) return;
     body.ai_api_key = $('#cfgKey').value.trim();
