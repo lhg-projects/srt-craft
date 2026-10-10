@@ -59,7 +59,7 @@ def test_connection(cfg=None):
     started = time.perf_counter()
     try:
         out = _chat(cfg, [{"role": "user", "content": "Reply with exactly: OK"}],
-                    max_tokens=16, timeout=60)
+                    max_tokens=512, timeout=60)
         elapsed = time.perf_counter() - started
         if not out.strip():
             return False, "模型返回了空响应", elapsed
@@ -128,21 +128,69 @@ def _model_str(cfg):
     return model, base_url
 
 
+# API 格式：同一自定义 Base URL 可能暴露不同协议
+API_FORMATS = {
+    "chat":      {"label": "Chat Completions（/chat/completions）", "tip": "最通用的 OpenAI 兼容格式，绝大多数服务用这个"},
+    "responses": {"label": "Responses（/responses）",               "tip": "OpenAI 新版 /v1/responses 接口（火山方舟、OpenAI 官方新端点等）"},
+    "anthropic": {"label": "Anthropic Messages（/v1/messages）",    "tip": "Claude 原生格式；Base URL 填到服务根，不用带 /messages"},
+}
+
+
 def _chat(cfg, messages, max_tokens=16000, timeout=600):
     from litellm import completion
+    import litellm
     model, base_url = _model_str(cfg)
     if not model:
         raise RuntimeError("请先在「⚙️ AI 设置」选择供应商并填写模型名")
+    key = (cfg.get("ai_api_key") or "").strip()
+    fmt = (cfg.get("ai_format") or "chat").strip()
+
+    if fmt == "responses":
+        # OpenAI Responses 协议：litellm 独立入口
+        from litellm import responses as _responses
+        r = _responses(input=messages, model=model, max_output_tokens=max_tokens,
+                       temperature=0.1, timeout=timeout,
+                       **({"api_key": key} if key else {}),
+                       **({"base_url": base_url} if base_url else {}))
+        content = getattr(r, "output_text", None)
+        if not content:
+            content = ""
+            for item in getattr(r, "output", []) or []:
+                if getattr(item, "type", "") == "message":
+                    for part in getattr(item, "content", []) or []:
+                        if getattr(part, "type", "") == "output_text":
+                            content += part.text or ""
+        return re.sub(r"<think>.*?</think>", "", content, flags=re.S).strip()
+
+    if fmt == "anthropic":
+        # Claude 原生 /v1/messages：litellm 的 anthropic 路由要求 base_url 不带 /v1
+        # （它自己补 /v1/messages）。兼容用户写到 /v1 或 /v1/messages 的两种习惯。
+        b = base_url.rstrip("/")
+        if b.endswith("/v1/messages"):
+            b = b[:-len("/v1/messages")]
+        if b.endswith("/v1"):
+            b = b[:-len("/v1")]
+        base_url = b
+        # 剥掉 _model_str 可能带上的 openai/ 等供应商前缀——上游只认裸模型名
+        bare = model.split("/", 1)[-1]
+        model = "anthropic/" + bare
+    elif fmt not in ("chat", "", None):
+        raise RuntimeError(f"未知 API 格式：{fmt}")
+
     kwargs = {"model": model, "messages": messages,
               "max_tokens": max_tokens, "temperature": 0.1, "timeout": timeout}
-    key = (cfg.get("ai_api_key") or "").strip()
     if key:
         kwargs["api_key"] = key
     if base_url:
         kwargs["api_base"] = base_url
     r = completion(**kwargs)
-    content = r.choices[0].message.content or ""
-    # 思考型模型会把推理放在 <think> 标签里
+    msg = r.choices[0].message
+    content = msg.content or ""
+    # 推理模型（DeepSeek-R1 风格）思考超预算时 content 为空、reasoning 有货：
+    # 这不是空响应，是截断——明确报错并提示加大 max_tokens
+    if not content.strip() and (getattr(msg, "reasoning_content", None) or getattr(msg, "reasoning", None)):
+        raise RuntimeError(
+            f"模型只输出了思考过程（max_tokens={max_tokens} 已用尽），请加大 max_tokens 或换用响应更快的模型")
     return re.sub(r"<think>.*?</think>", "", content, flags=re.S).strip()
 
 
