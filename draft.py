@@ -365,6 +365,31 @@ def import_jianying_draft(srt_text, audio_path=None, draft_name=None):
         return {"ok": False, "error": f"草稿生成失败: {e}"}
 
 
+def health_check(max_probe=12):
+    """草稿格式健康检查 + 剪映运行状态（顶栏健康点 + 「从草稿生成」可用性）。
+    抽样探测最近草稿能否解密：全部可读 = ok。"""
+    drafts = list_drafts()[:max_probe]
+    results, all_ok = [], True
+    for d in drafts:
+        name = d.get("name", "")
+        try:
+            info_path = os.path.join(DRAFT_ROOT, name, "draft_info.json")
+            if os.path.isfile(info_path):
+                _load_any_file(info_path)
+            results.append({"name": name, "readable": True})
+        except Exception as e:
+            all_ok = False
+            results.append({"name": name, "readable": False, "error": str(e)[:80]})
+    try:
+        running = jianying_running()
+    except Exception:
+        running = False
+    bad = sum(1 for r in results if not r["readable"])
+    msg = (f"草稿格式检查：{len(results)} 个抽样全部可读" if results and all_ok
+           else (f"{bad} 个草稿格式异常（不影响已生成的 SRT）" if results else "未发现本地草稿"))
+    return {"ok": all_ok, "jianying_running": running, "message": msg, "drafts": results}
+
+
 def _parse_srt_times(srt_text):
     """解析 SRT → [{start, end, text}]，时间单位微秒（剪映内部单位）。"""
     subs = []
