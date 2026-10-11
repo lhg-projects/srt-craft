@@ -179,7 +179,7 @@
   }
   /* 矮窗口（含 13/14 寸笔记本满屏）：进一步压 hero 与固定文案，
      确保左右面板内容自然装下、不出现内部滚动条 */
-  @media (min-width: 769px) and (max-height: 940px) {
+  @media (min-width: 769px) and (max-height: 980px) {
     .hero { margin: 10px auto 0; }
     .hero h1 { font-size: 18px; }
     .hero p, .eq { display: none; }
@@ -295,7 +295,7 @@
     <div class="row">
       <label style="font-size:13px" title="默认模式（不用AI）：同音错字/漏字/标点，秒级完成"><input type="checkbox" id="phonetic" checked> <svg class="ic" aria-hidden="true"><use href="#i-volume"/></svg> 拼音对齐（默认）</label>
       <label style="font-size:13px" title="调用大模型语义修复，最准确；长字幕需 1-4 分钟。无原稿时必须使用且自动勾选"><input type="checkbox" id="aiMode"> <svg class="ic" aria-hidden="true"><use href="#i-cpu"/></svg> AI 校正<span id="aiMust" style="color:var(--warn);display:none">（无原稿必选）</span></label>
-      <button id="goBtn" style="margin-left:auto">开始校正</button>
+      <button id="goBtn" style="margin-left:auto" title="需要先在 ① 粘贴 / 生成 SRT 字幕">开始校正</button>
     </div>
     <div id="status"></div>
   </div>
@@ -369,6 +369,13 @@ async function init() {
   $('#script').addEventListener('input', syncAiRequirement);
   syncAiRequirement();
   initSource();
+  // 快捷键：Cmd/Ctrl+Enter = 开始校正（SRT 就绪时）
+  document.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !$('#goBtn').disabled) {
+      e.preventDefault();
+      $('#goBtn').click();
+    }
+  });
 }
 
 // ---------- ① 来源切换 + 音频转 SRT ----------
