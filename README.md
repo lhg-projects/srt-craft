@@ -153,7 +153,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/lhg-projects/srt-craft/main/
 
 ## 自检与反馈
 
-发现 bug 或用着别扭，欢迎提 [issue](https://github.com/lhg-skills/srt-craft/issues)；崩溃类问题请附「③ 校正报告」截图与控制台输出。
+发现 bug 或用着别扭，欢迎提 [issue](https://github.com/lhg-projects/srt-craft/issues)；崩溃类问题请附「③ 校正报告」截图与控制台输出。
 
 ---
 
