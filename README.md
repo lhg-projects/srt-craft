@@ -157,7 +157,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/lhg-projects/srt-craft/main/
 
 ---
 
-出品：[lhg-skills](https://github.com/lhg-skills) · 刘洪光（安徽合肥）· 视频号搜「刘洪光实名上网」
+出品：[lhg-skills](https://github.com/lhg-skills) · 刘洪光（安徽合肥）· 抖音搜「刘老师讲AI实战」
 
 ## License
 
