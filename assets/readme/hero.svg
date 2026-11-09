@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="380" viewBox="0 0 1200 380"
+     role="img" aria-labelledby="title desc">
+  <title id="title">SRT Craft — 字幕校正：拼音对齐修同音错字，时间轴零漂移</title>
+  <desc id="desc">左侧是项目名与一句话价值；右侧是一条字幕时间轴：错字“力勤”被红线划掉，改成绿色的“利勤”，时间码原封不动。</desc>
+
+  <rect width="1200" height="380" rx="26" fill="#FAF7F0"/>
+  <rect x="0" y="0" width="1200" height="8" fill="#D97706"/>
+
+  <!-- Title block -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
+    <text x="56" y="72" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="18" letter-spacing="2" fill="#9A6700">SRT + 原稿 · 拼音对齐 · 本地运行</text>
+    <text x="56" y="150" font-size="68" font-weight="700" fill="#1F2328">SRT Craft</text>
+    <text x="56" y="198" font-size="27" fill="#3D444D">拼音对齐修同音错字，时间轴一个毫秒都不动。</text>
+    <text x="56" y="234" font-size="22" fill="#656D76">贴入你的原稿，错字自动改好；没稿子也能用音频转写。</text>
+    <line x1="56" y1="262" x2="600" y2="262" stroke="#D8D3C3" stroke-width="2"/>
+    <text x="56" y="296" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="18" fill="#656D76">Python · Flask · macOS / Windows&#160;&#160;MIT</text>
+    <text x="56" y="330" font-size="18" fill="#3D444D">160 条真实草稿 round-trip 验证：时间码逐字节保留</text>
+  </g>
+
+  <!-- Proof: subtitle timeline card -->
+  <g>
+    <rect x="680" y="52" width="464" height="276" rx="18" fill="#FFFFFF" stroke="#E3DDC9" stroke-width="2"/>
+    <rect x="680" y="52" width="464" height="46" rx="18" fill="#1F2328"/>
+    <rect x="680" y="80" width="464" height="18" fill="#1F2328"/>
+    <text x="704" y="82" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#FAF7F0">SRT · 00:01:12,400 --&gt; 00:01:15,100</text>
+
+    <text x="704" y="140" font-size="20" fill="#656D76">原句（ASR 识别）</text>
+    <text x="704" y="176" font-size="24" fill="#1F2328">“市盈率看中的是<tspan fill="#CF222E">力勤</tspan>”</text>
+    <line x1="880" y1="168" x2="940" y2="168" stroke="#CF222E" stroke-width="3" stroke-linecap="round"/>
+
+    <text x="704" y="222" font-size="20" fill="#656D76">对齐原稿后</text>
+    <text x="704" y="258" font-size="24" fill="#1F2328">“市盈率看中的是<tspan fill="#1A7F37" font-weight="700">利勤</tspan>”</text>
+
+    <line x1="704" y1="292" x2="1120" y2="292" stroke="#E3DDC9" stroke-width="2"/>
+    <text x="704" y="316" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17" fill="#9A6700">时间码未动 · 只改文本 · 逐条报告可核对</text>
+  </g>
+</svg>

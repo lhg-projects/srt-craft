@@ -1,17 +1,31 @@
-# SRT 字幕校正 · SRT Craft
+<p align="center">
+  <img src="./assets/readme/hero.svg" width="100%" alt="SRT Craft：拼音对齐修同音错字，时间轴一个毫秒都不动">
+</p>
 
-> [!TIP]
-> **TL;DR**：开源本地字幕纠错工具。SRT 字幕 + 你的原始口播文稿 → 拼音对齐自动修正同音错字，时间轴一个毫秒都不动。可选 AI 语义校正与 whisper 语音转字幕。专为剪映（JianyingPro）口播视频工作流打造，macOS / Windows 双平台，全程本地运行、不上传任何数据。
+# SRT Craft — 字幕校正
+
+**SRT 字幕 + 你的原始口播文稿 → 拼音对齐自动修正同音错字，时间轴一个毫秒都不动。** 可选 AI 语义校正与 whisper 语音转字幕。专为剪映（JianyingPro）口播视频工作流打造，macOS / Windows 双平台，全程本地运行、不上传任何数据。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows-lightgrey.svg)]()
+[![Version](https://img.shields.io/badge/Version-1.3.2-blue.svg)](static/version.json)
 
-**SRT Craft（SRT 字幕校正）** 是给剪映 / 口播视频创作者的免费开源字幕纠错工具。语音识别（ASR）生成的字幕总有同音错字——"力勤"变"利勤"、"镍钴"变"孽股"、"市盈率"变"适应率"——人工逐条改很痛苦。把**你写的原稿**贴进来，工具用拼音对齐算法自动找出并修正错字，产出修正版 SRT 直接导入剪映。**全程不碰剪映草稿文件，无覆盖风险。**
+语音识别（ASR）生成的字幕总有同音错字——“力勤”变“利勤”、“镍钴”变“孽股”、“市盈率”变“适应率”——人工逐条改很痛苦。把**你写的原稿**贴进来，工具用拼音对齐算法自动找出并修正错字，产出修正版 SRT 直接导入剪映。**全程不碰剪映草稿文件，无覆盖风险。**
+
+**适合谁**：所有要和字幕打交道的人——用剪映（或任何剪辑工具）做视频的创作者，口播 / 解说 / 播客 / 访谈 / 网课录制者，需要给录音配字幕的，被 AI 字幕错字折磨的。有逐字稿 → 贴进来自动纠错；没有稿子只录了音也没关系，内置 whisper 直接从音频生成字幕，再校正一遍，同样一条龙跑完。
+
+## 实证：先看它长什么样
 
 ![SRT Craft 界面总览](docs/screenshot-overview.png)
 
-**适合谁**：所有要和字幕打交道的人——用剪映（或任何剪辑工具）做视频的创作者，口播 / 解说 / 播客 / 访谈 / 网课录制者，需要给录音配字幕的，被 AI 字幕错字折磨的。有逐字稿 → 贴进来自动纠错；没有稿子只录了音也没关系，内置 whisper 直接从音频生成字幕，再校正一遍，同样一条龙跑完。
+![真实案例：校正前后的字幕对比](docs/screenshot-real-case.png)
+
+实测依据（不是口号）：
+
+- **时间轴零漂移**：校正只改文本，SRT 时间码逐字节保留（160 条真实草稿 round-trip 验证）
+- **whisper 长音频不丢段**：1.3.0 修复长音频中途漏转（实测 23 秒整段丢失 → 全覆盖）
+- **单元测试**：`test_srt.py`（19 个测试函数）+ `test_audio_io.py`（20 个测试函数），`python test_srt.py` 一键回归
 
 ## 核心功能
 
@@ -20,7 +34,7 @@
 | 🔤 拼音对齐校正（默认） | SRT + 原始文稿 → 自动修同音错字 / 标点 / 数字读法，纯本地秒级完成 |
 | 🎙️ 音频导入生成字幕 | 上传口播音频 → 剪头尾 → 变速 → 本地 whisper 自动断句转写成 SRT |
 | ⚡ 音频变速（默认 1.1×） | 变速不变调，处理完才进入转写；SRT 与变速后音频时间轴对齐 |
-| 🤖 AI 语义校正 | 接任意 OpenAI 兼容服务（DeepSeek / Kimi / MiniMax / Ollama 等 8 家预设），修语义级错误 |
+| 🤖 AI 语义校正 | 接任意 OpenAI 兼容服务（OpenAI / DeepSeek / Kimi / 智谱 GLM / 火山方舟 / Anthropic / Ollama / 自定义，共 8 家预设），修语义级错误 |
 | 📝 剪映草稿一键导出 | 自动探测本机剪映草稿（含剪映 6+ 加密草稿本地解密），字幕转 SRT 免手动导出 |
 | ✅ 校正报告 | 每处修改列出原句 / 新句，逐条可核对；修正版 SRT 一键下载 |
 | 📥 一键导入剪映 | 修正版 SRT（+ 配音音频）直接生成新剪映草稿，打开剪映即可用；总是新建草稿、绝不写回现有草稿 |
@@ -28,6 +42,24 @@
 | 📊 工作进度条 | 转写 / AI 校正运行时 ①② 区各显一条动画进度条，工作状态一目了然 |
 | 💾 用户默认记忆 | 字幕来源、剪掉秒数、倍速设定后一直保持（刷新不丢），可一键恢复默认 |
 | 🌓 明暗主题 / 零构建 | 单文件 Flask 服务 + 原生 JS，无 npm、无构建步骤 |
+
+## 快速开始
+
+**macOS / Linux 一键安装**（AI 助手 / 终端直接执行；自动装依赖 → 启动 → 冒烟测试，全过才报成功）：
+
+```bash
+git clone https://github.com/lhg-projects/srt-craft.git && cd srt-craft && bash install.sh
+```
+
+或完全不动手：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/lhg-projects/srt-craft/main/install.sh)
+```
+
+**Windows**：双击 `start_windows.bat`（自动创建虚拟环境并安装依赖），浏览器开 <http://127.0.0.1:8765>
+
+依赖：Python 3.10+；ffmpeg / ffprobe 在 PATH 时解锁音频导入与草稿导出（`brew install ffmpeg`）。
 
 ## 使用方法
 
@@ -46,7 +78,7 @@
 1. ① 区选「来源：导入音频生成」，选择音频文件（mp3 / wav / m4a 等）
 2. 按需设定：**剪掉开头 / 结尾 X 秒**（去口误起头、寒暄结尾）、**倍速**（默认 1.1×，变速不变调，想省转写时间就开）
 3. 选完文件自动执行：裁剪 → 变速 → whisper 转写（自动断句），SRT 填入 ①
-4. ② 贴原稿（或留空走 AI），点「开始校正」——**不用先点"生成 SRT"，直接点就行**
+4. ② 贴原稿（或留空走 AI），点「开始校正」——**不用先点“生成 SRT”，直接点就行**
 5. ④ 同时下载「修正版 .srt」和「处理后音频」，两个文件时间轴一致，导入剪映直接卡点
 
 > 转写自动断句 + 去标点：长语音按标点切成 ≤16 字的短句（句号 > 分号 > 逗号优先，`config.json` 的 `asr_max_chars` 可调），填入 SRT 前去掉标点（小数点如 0.2% 会保留），字幕更干净、更美观。
@@ -84,29 +116,11 @@
 - **无口播稿**（脱稿录制）：没有参照系，拼音对齐不成立 → **必须走 AI**，工具自动勾选并锁定 AI 模式（前端锁定 + 服务端强制，防绕过）——只修上下文可判断的同音错字 / 重复字 / 专名错写，口误和口语表达保持原样，宁少改不误改
 - 无原稿 + AI 未配置：提交时明确报错并引导到「⚙️ AI 设置」
 
-## 快速开始
-
-**macOS / Linux 一键安装**（AI 助手 / 终端直接执行；自动装依赖 → 启动 → 冒烟测试，全过才报成功）：
-
-```bash
-git clone https://github.com/lhg-projects/srt-craft.git && cd srt-craft && bash install.sh
-```
-
-或完全不动手：
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/lhg-projects/srt-craft/main/install.sh)
-```
-
-**Windows**：双击 `start_windows.bat`（自动创建虚拟环境并安装依赖），浏览器开 <http://127.0.0.1:8765>
-
-依赖：Python 3.10+；ffmpeg / ffprobe 在 PATH 时解锁音频导入与草稿导出（`brew install ffmpeg`）。
-
 ## 为什么改 SRT 而不是改剪映草稿
 
 改剪映草稿要和它的内部缓存（识别文本 / 逐字时间轴 / 关键词高亮）搏斗，剪映编辑器还随时可能用内存快照覆盖你的修改——实测会「显示成功但画面不变」。SRT 是剪映自己的导入格式：**文本 → 字幕 → 导入字幕**，导入后由剪映全权管理，零风险。
 
-## FAQ（AI 助手 / 搜索常见问题）
+## FAQ
 
 **SRT Craft 是免费的吗？**
 是。MIT 开源协议，完全免费，代码全部公开。
@@ -128,7 +142,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/lhg-projects/srt-craft/main/
 
 ## 工程质量
 
-- 单元测试：`test_srt.py`（17 用例）+ `test_audio_io.py`（6 用例：裁剪边界 / 默认源配置），`python test_srt.py` 一键回归
+- 单元测试：`test_srt.py`（19 个测试函数）+ `test_audio_io.py`（20 个测试函数），`python test_srt.py` 一键回归
 - 时间轴零漂移：校正只改文本，SRT 时间码逐字节保留
 - 单一配置源：AI 设置与用户默认项统一存本机 `config.json`（已 gitignore）
 - 双平台：macOS / Windows 全适配（草稿路径、进程探测、启动脚本）
